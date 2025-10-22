@@ -8,7 +8,7 @@ struct FEAViewerApp: App {
             ContentView()
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1400, height: 900)
+        .defaultSize(width: 1600, height: 900)
     }
 }
 
@@ -42,7 +42,7 @@ struct ContentView: View {
                 ModelBuilderView(model: feaModel)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(minWidth: 350)
+            .frame(minWidth: 450)
 
             // Middle: Visualization
             VStack(spacing: 0) {
@@ -82,6 +82,8 @@ struct ContentView: View {
 
 struct ModelBuilderView: View {
     @ObservedObject var model: FEAModel
+    @State private var showingAddNode = false
+    @State private var showingAddElement = false
     @State private var showingAddConstraint = false
 
     var body: some View {
@@ -106,56 +108,69 @@ struct ModelBuilderView: View {
                     }
                 }
 
-                // Shaft elements
+                // Nodes
                 GroupBox {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Shaft Elements")
+                            Text("Nodes")
                                 .font(.headline)
                             Spacer()
-                            Button(action: { model.addShaftElement() }) {
+                            Button(action: { showingAddNode = true }) {
                                 Label("Add", systemImage: "plus.circle")
                             }
                         }
 
-                        ForEach(model.shaftElements) { element in
-                            ShaftElementRow(model: model, element: element)
+                        ForEach(model.nodes) { node in
+                            NodeRow(model: model, node: node)
+                        }
+
+                        if model.nodes.isEmpty {
+                            Text("No nodes defined")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.vertical, 4)
                         }
                     }
                 }
 
-                // Disk elements
+                // Elements
                 GroupBox {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Disk Elements")
+                            Text("Elements")
                                 .font(.headline)
                             Spacer()
-                            Button(action: { model.addDiskElement() }) {
+                            Button(action: { showingAddElement = true }) {
                                 Label("Add", systemImage: "plus.circle")
                             }
                         }
 
-                        ForEach(model.diskElements) { element in
-                            DiskElementRow(model: model, element: element)
-                        }
-                    }
-                }
-
-                // Shell elements
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Shell Elements")
-                                .font(.headline)
-                            Spacer()
-                            Button(action: { model.addShellElement() }) {
-                                Label("Add", systemImage: "plus.circle")
+                        if !model.shaftElements.isEmpty {
+                            Text("Shaft Elements").font(.subheadline).bold()
+                            ForEach(model.shaftElements) { element in
+                                ShaftElementRow(model: model, element: element)
                             }
                         }
 
-                        ForEach(model.shellElements) { element in
-                            ShellElementRow(model: model, element: element)
+                        if !model.diskElements.isEmpty {
+                            Text("Disk Elements").font(.subheadline).bold().padding(.top, 4)
+                            ForEach(model.diskElements) { element in
+                                DiskElementRow(model: model, element: element)
+                            }
+                        }
+
+                        if !model.shellElements.isEmpty {
+                            Text("Shell Elements").font(.subheadline).bold().padding(.top, 4)
+                            ForEach(model.shellElements) { element in
+                                ShellElementRow(model: model, element: element)
+                            }
+                        }
+
+                        if model.shaftElements.isEmpty && model.diskElements.isEmpty && model.shellElements.isEmpty {
+                            Text("No elements defined")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.vertical, 4)
                         }
                     }
                 }
@@ -167,11 +182,10 @@ struct ModelBuilderView: View {
                             Text("Constraints")
                                 .font(.headline)
                             Spacer()
-                            Button(action: {
-                                showingAddConstraint = true
-                            }) {
+                            Button(action: { showingAddConstraint = true }) {
                                 Label("Add", systemImage: "plus.circle")
                             }
+                            .disabled(model.nodes.isEmpty)
                         }
 
                         ForEach(model.constraints) { constraint in
@@ -189,78 +203,110 @@ struct ModelBuilderView: View {
             }
             .padding()
         }
+        .sheet(isPresented: $showingAddNode) {
+            AddNodeSheet(model: model, isPresented: $showingAddNode)
+        }
+        .sheet(isPresented: $showingAddElement) {
+            AddElementSheet(model: model, isPresented: $showingAddElement)
+        }
         .sheet(isPresented: $showingAddConstraint) {
             AddConstraintSheet(model: model, isPresented: $showingAddConstraint)
         }
     }
 }
 
-// MARK: - Add Constraint Sheet
+// MARK: - Node Row
 
-struct AddConstraintSheet: View {
+struct NodeRow: View {
+    @ObservedObject var model: FEAModel
+    let node: FEANode
+
+    var body: some View {
+        HStack {
+            Image(systemName: nodeIcon)
+                .foregroundColor(nodeColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(node.label.isEmpty ? node.type.displayName : node.label)
+                    .font(.caption)
+                Text(node.description)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Button(action: { model.deleteNode(node) }) {
+                Image(systemName: "trash")
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(6)
+        .background(nodeColor.opacity(0.1))
+        .cornerRadius(4)
+    }
+
+    var nodeIcon: String {
+        switch node.type {
+        case .shaft: return "circle.fill"
+        case .disk: return "circle.circle"
+        case .shell: return "circle.dotted"
+        }
+    }
+
+    var nodeColor: Color {
+        switch node.type {
+        case .shaft: return .blue
+        case .disk: return .green
+        case .shell: return .orange
+        }
+    }
+}
+
+// MARK: - Add Node Sheet
+
+struct AddNodeSheet: View {
     @ObservedObject var model: FEAModel
     @Binding var isPresented: Bool
 
-    @State private var selectedElementIndex = 0
-    @State private var selectedLocation: ConstraintLocation = .shaftStart
-    @State private var selectedDOF: DOFType = .w
-    @State private var selectedType: ConstraintType = .fixed
-    @State private var prescribedValue: Double = 0.0
+    @State private var nodeType: NodeType = .shaft
+    @State private var axialPosition: Double = 0.0
+    @State private var radialPosition: Double = 100.0
+    @State private var label: String = ""
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Add Constraint")
+            Text("Add Node")
                 .font(.title2)
                 .bold()
 
             Form {
-                Section("Location") {
-                    Picker("Element Type", selection: $selectedLocation) {
-                        if !model.shaftElements.isEmpty {
-                            Text("Shaft Start").tag(ConstraintLocation.shaftStart)
-                            Text("Shaft End").tag(ConstraintLocation.shaftEnd)
-                        }
-                        if !model.diskElements.isEmpty {
-                            Text("Disk Inner").tag(ConstraintLocation.diskInner)
-                            Text("Disk Outer").tag(ConstraintLocation.diskOuter)
-                        }
-                        if !model.shellElements.isEmpty {
-                            Text("Shell Start").tag(ConstraintLocation.shellStart)
-                            Text("Shell End").tag(ConstraintLocation.shellEnd)
-                        }
-                    }
+                Picker("Node Type", selection: $nodeType) {
+                    Text("Shaft").tag(NodeType.shaft)
+                    Text("Disk").tag(NodeType.disk)
+                    Text("Shell").tag(NodeType.shell)
+                }
 
-                    Picker("Element Index", selection: $selectedElementIndex) {
-                        ForEach(0..<maxElementCount, id: \.self) { index in
-                            Text("#\(index)").tag(index)
-                        }
+                if nodeType == .shaft || nodeType == .shell {
+                    HStack {
+                        Text("Axial Position (z):")
+                        TextField("", value: $axialPosition, format: .number)
+                        Text("mm")
                     }
                 }
 
-                Section("DOF") {
-                    Picker("Degree of Freedom", selection: $selectedDOF) {
-                        ForEach(model.getAvailableDOFs(for: selectedLocation), id: \.self) { dof in
-                            Text(dof.displayName).tag(dof)
-                        }
+                if nodeType == .disk {
+                    HStack {
+                        Text("Radial Position (r):")
+                        TextField("", value: $radialPosition, format: .number)
+                        Text("mm")
                     }
                 }
 
-                Section("Constraint Type") {
-                    Picker("Type", selection: $selectedType) {
-                        Text("Fixed (= 0)").tag(ConstraintType.fixed)
-                        Text("Prescribed").tag(ConstraintType.prescribed)
-                    }
-
-                    if selectedType == .prescribed {
-                        HStack {
-                            Text("Value:")
-                            TextField("", value: $prescribedValue, format: .number)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    }
+                HStack {
+                    Text("Label (optional):")
+                    TextField("", text: $label)
                 }
             }
-            .formStyle(.grouped)
+            .padding()
 
             HStack {
                 Button("Cancel") {
@@ -269,14 +315,16 @@ struct AddConstraintSheet: View {
                 .keyboardShortcut(.cancelAction)
 
                 Button("Add") {
-                    let constraint = Constraint(
-                        elementIndex: selectedElementIndex,
-                        location: selectedLocation,
-                        dofType: selectedDOF,
-                        constraintType: selectedType,
-                        value: prescribedValue
-                    )
-                    model.addConstraint(constraint)
+                    let node: FEANode
+                    switch nodeType {
+                    case .shaft:
+                        node = .shaft(z: axialPosition, label: label)
+                    case .disk:
+                        node = .disk(r: radialPosition, label: label)
+                    case .shell:
+                        node = .shell(z: axialPosition, label: label)
+                    }
+                    model.addNode(node)
                     isPresented = false
                 }
                 .keyboardShortcut(.defaultAction)
@@ -284,19 +332,7 @@ struct AddConstraintSheet: View {
             }
             .padding()
         }
-        .padding()
-        .frame(width: 400, height: 500)
-    }
-
-    private var maxElementCount: Int {
-        switch selectedLocation {
-        case .shaftStart, .shaftEnd:
-            return model.shaftElements.count
-        case .diskInner, .diskOuter:
-            return model.diskElements.count
-        case .shellStart, .shellEnd:
-            return model.shellElements.count
-        }
+        .frame(width: 400, height: 300)
     }
 }
 
@@ -309,7 +345,10 @@ struct ShaftElementRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Shaft").font(.caption).bold()
+                Image(systemName: "arrow.left.and.right")
+                    .foregroundColor(.blue)
+                Text("Shaft: \(nodeName(element.startNodeID)) → \(nodeName(element.endNodeID))")
+                    .font(.caption)
                 Spacer()
                 Button(action: { model.deleteShaftElement(element) }) {
                     Image(systemName: "trash")
@@ -317,45 +356,33 @@ struct ShaftElementRow: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            if let index = model.shaftElements.firstIndex(where: { $0.id == element.id }) {
-                HStack {
-                    Text("Diameter:")
-                        .font(.caption)
-                        .frame(width: 80, alignment: .leading)
-                    TextField("", value: $model.shaftElements[index].diameter, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                    Text("mm")
-                        .font(.caption)
-                }
-
-                HStack {
-                    Text("Start Z:")
-                        .font(.caption)
-                        .frame(width: 80, alignment: .leading)
-                    TextField("", value: $model.shaftElements[index].startPosition, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                    Text("mm")
-                        .font(.caption)
-                }
-
-                HStack {
-                    Text("End Z:")
-                        .font(.caption)
-                        .frame(width: 80, alignment: .leading)
-                    TextField("", value: $model.shaftElements[index].endPosition, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                    Text("mm")
-                        .font(.caption)
-                }
+            HStack {
+                Text("d = \(element.diameter, specifier: "%.1f") mm")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Spacer()
+                TextField("", value: Binding(
+                    get: { element.diameter },
+                    set: { newValue in
+                        if let index = model.shaftElements.firstIndex(where: { $0.id == element.id }) {
+                            model.shaftElements[index].diameter = newValue
+                        }
+                    }
+                ), format: .number)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 80)
             }
         }
-        .padding(8)
+        .padding(6)
         .background(Color.blue.opacity(0.1))
         .cornerRadius(4)
+    }
+
+    func nodeName(_ id: UUID) -> String {
+        if let node = model.getNode(id: id) {
+            return node.label.isEmpty ? node.description : node.label
+        }
+        return "???"
     }
 }
 
@@ -366,7 +393,10 @@ struct DiskElementRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Disk").font(.caption).bold()
+                Image(systemName: "circle")
+                    .foregroundColor(.green)
+                Text("Disk: \(nodeName(element.innerNodeID)) → \(nodeName(element.outerNodeID))")
+                    .font(.caption)
                 Spacer()
                 Button(action: { model.deleteDiskElement(element) }) {
                     Image(systemName: "trash")
@@ -374,34 +404,22 @@ struct DiskElementRow: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            if let index = model.diskElements.firstIndex(where: { $0.id == element.id }) {
-                HStack {
-                    Text("Inner R:")
-                        .font(.caption)
-                        .frame(width: 80, alignment: .leading)
-                    TextField("", value: $model.diskElements[index].innerRadius, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                    Text("mm")
-                        .font(.caption)
-                }
-
-                HStack {
-                    Text("Outer R:")
-                        .font(.caption)
-                        .frame(width: 80, alignment: .leading)
-                    TextField("", value: $model.diskElements[index].outerRadius, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                    Text("mm")
-                        .font(.caption)
-                }
+            HStack {
+                Text("t: \(element.thicknessBegin, specifier: "%.1f") → \(element.thicknessEnd, specifier: "%.1f") mm")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
         }
-        .padding(8)
+        .padding(6)
         .background(Color.green.opacity(0.1))
         .cornerRadius(4)
+    }
+
+    func nodeName(_ id: UUID) -> String {
+        if let node = model.getNode(id: id) {
+            return node.label.isEmpty ? node.description : node.label
+        }
+        return "???"
     }
 }
 
@@ -412,7 +430,10 @@ struct ShellElementRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Shell").font(.caption).bold()
+                Image(systemName: "cylinder")
+                    .foregroundColor(.orange)
+                Text("Shell: \(nodeName(element.startNodeID)) → \(nodeName(element.endNodeID))")
+                    .font(.caption)
                 Spacer()
                 Button(action: { model.deleteShellElement(element) }) {
                     Image(systemName: "trash")
@@ -420,60 +441,304 @@ struct ShellElementRow: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            if let index = model.shellElements.firstIndex(where: { $0.id == element.id }) {
-                HStack {
-                    Text("Radius:")
-                        .font(.caption)
-                        .frame(width: 80, alignment: .leading)
-                    TextField("", value: $model.shellElements[index].radius, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                    Text("mm")
-                        .font(.caption)
-                }
-
-                HStack {
-                    Text("Thickness:")
-                        .font(.caption)
-                        .frame(width: 80, alignment: .leading)
-                    TextField("", value: $model.shellElements[index].thickness, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                    Text("mm")
-                        .font(.caption)
-                }
+            HStack {
+                Text("r = \(element.radius, specifier: "%.1f") mm, t = \(element.thickness, specifier: "%.1f") mm")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
         }
-        .padding(8)
+        .padding(6)
         .background(Color.orange.opacity(0.1))
         .cornerRadius(4)
     }
+
+    func nodeName(_ id: UUID) -> String {
+        if let node = model.getNode(id: id) {
+            return node.label.isEmpty ? node.description : node.label
+        }
+        return "???"
+    }
 }
+
+// MARK: - Add Element Sheet
+
+struct AddElementSheet: View {
+    @ObservedObject var model: FEAModel
+    @Binding var isPresented: Bool
+
+    @State private var elementType: FEAElementType = .shaft
+    @State private var startNodeID: UUID?
+    @State private var endNodeID: UUID?
+    @State private var diameter: Double = 50.0
+    @State private var radius: Double = 300.0
+    @State private var thickness: Double = 10.0
+    @State private var thicknessBegin: Double = 20.0
+    @State private var thicknessEnd: Double = 10.0
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Add Element")
+                .font(.title2)
+                .bold()
+
+            Form {
+                Picker("Element Type", selection: $elementType) {
+                    Text("Shaft").tag(FEAElementType.shaft)
+                    Text("Disk").tag(FEAElementType.disk)
+                    Text("Shell").tag(FEAElementType.shell)
+                }
+
+                if elementType == .shaft {
+                    Picker("Start Node", selection: $startNodeID) {
+                        Text("Select...").tag(nil as UUID?)
+                        ForEach(shaftNodes) { node in
+                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        }
+                    }
+
+                    Picker("End Node", selection: $endNodeID) {
+                        Text("Select...").tag(nil as UUID?)
+                        ForEach(shaftNodes) { node in
+                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        }
+                    }
+
+                    HStack {
+                        Text("Diameter:")
+                        TextField("", value: $diameter, format: .number)
+                        Text("mm")
+                    }
+                }
+
+                if elementType == .disk {
+                    Picker("Inner Node", selection: $startNodeID) {
+                        Text("Select...").tag(nil as UUID?)
+                        ForEach(diskNodes) { node in
+                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        }
+                    }
+
+                    Picker("Outer Node", selection: $endNodeID) {
+                        Text("Select...").tag(nil as UUID?)
+                        ForEach(diskNodes) { node in
+                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        }
+                    }
+
+                    HStack {
+                        Text("Thickness (inner):")
+                        TextField("", value: $thicknessBegin, format: .number)
+                        Text("mm")
+                    }
+
+                    HStack {
+                        Text("Thickness (outer):")
+                        TextField("", value: $thicknessEnd, format: .number)
+                        Text("mm")
+                    }
+                }
+
+                if elementType == .shell {
+                    Picker("Start Node", selection: $startNodeID) {
+                        Text("Select...").tag(nil as UUID?)
+                        ForEach(shellNodes) { node in
+                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        }
+                    }
+
+                    Picker("End Node", selection: $endNodeID) {
+                        Text("Select...").tag(nil as UUID?)
+                        ForEach(shellNodes) { node in
+                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        }
+                    }
+
+                    HStack {
+                        Text("Radius:")
+                        TextField("", value: $radius, format: .number)
+                        Text("mm")
+                    }
+
+                    HStack {
+                        Text("Thickness:")
+                        TextField("", value: $thickness, format: .number)
+                        Text("mm")
+                    }
+                }
+            }
+            .padding()
+
+            HStack {
+                Button("Cancel") {
+                    isPresented = false
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Add") {
+                    guard let start = startNodeID, let end = endNodeID else { return }
+
+                    switch elementType {
+                    case .shaft:
+                        model.addShaftElement(startNodeID: start, endNodeID: end)
+                        if let index = model.shaftElements.indices.last {
+                            model.shaftElements[index].diameter = diameter
+                        }
+                    case .disk:
+                        model.addDiskElement(innerNodeID: start, outerNodeID: end)
+                        if let index = model.diskElements.indices.last {
+                            model.diskElements[index].thicknessBegin = thicknessBegin
+                            model.diskElements[index].thicknessEnd = thicknessEnd
+                        }
+                    case .shell:
+                        model.addShellElement(startNodeID: start, endNodeID: end)
+                        if let index = model.shellElements.indices.last {
+                            model.shellElements[index].radius = radius
+                            model.shellElements[index].thickness = thickness
+                        }
+                    }
+
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(startNodeID == nil || endNodeID == nil)
+            }
+            .padding()
+        }
+        .frame(width: 450, height: 450)
+    }
+
+    var shaftNodes: [FEANode] {
+        model.nodes.filter { $0.type == .shaft }
+    }
+
+    var diskNodes: [FEANode] {
+        model.nodes.filter { $0.type == .disk }
+    }
+
+    var shellNodes: [FEANode] {
+        model.nodes.filter { $0.type == .shell }
+    }
+}
+
+// MARK: - Constraint Row
 
 struct ConstraintRow: View {
     @ObservedObject var model: FEAModel
     let constraint: Constraint
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: "pin.fill")
-                    .foregroundColor(.purple)
+        HStack {
+            Image(systemName: "pin.fill")
+                .foregroundColor(.purple)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(nodeName)
                     .font(.caption)
-                Text(constraint.description)
-                    .font(.caption)
-                Spacer()
-                Button(action: { model.deleteConstraint(constraint) }) {
-                    Image(systemName: "trash")
-                        .foregroundColor(.red)
-                }
-                .buttonStyle(.plain)
+                Text("\(constraint.dofType.displayName): \(constraintDesc)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
+            Spacer()
+            Button(action: { model.deleteConstraint(constraint) }) {
+                Image(systemName: "trash")
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(.plain)
         }
         .padding(6)
         .background(Color.purple.opacity(0.1))
         .cornerRadius(4)
+    }
+
+    var nodeName: String {
+        if let node = model.getNode(id: constraint.nodeID) {
+            return node.label.isEmpty ? node.description : node.label
+        }
+        return "???"
+    }
+
+    var constraintDesc: String {
+        switch constraint.constraintType {
+        case .fixed:
+            return "= 0"
+        case .prescribed:
+            return "= \(constraint.value)"
+        }
+    }
+}
+
+// MARK: - Add Constraint Sheet
+
+struct AddConstraintSheet: View {
+    @ObservedObject var model: FEAModel
+    @Binding var isPresented: Bool
+
+    @State private var selectedNodeID: UUID?
+    @State private var selectedDOF: DOFType = .w
+    @State private var selectedType: ConstraintType = .fixed
+    @State private var prescribedValue: Double = 0.0
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Add Constraint")
+                .font(.title2)
+                .bold()
+
+            Form {
+                Picker("Node", selection: $selectedNodeID) {
+                    Text("Select node...").tag(nil as UUID?)
+                    ForEach(model.nodes) { node in
+                        Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                    }
+                }
+
+                if let nodeID = selectedNodeID, let node = model.getNode(id: nodeID) {
+                    Picker("DOF", selection: $selectedDOF) {
+                        ForEach(DOFType.availableDOFs(for: node.type), id: \.self) { dof in
+                            Text(dof.displayName).tag(dof)
+                        }
+                    }
+                }
+
+                Picker("Type", selection: $selectedType) {
+                    Text("Fixed (= 0)").tag(ConstraintType.fixed)
+                    Text("Prescribed").tag(ConstraintType.prescribed)
+                }
+
+                if selectedType == .prescribed {
+                    HStack {
+                        Text("Value:")
+                        TextField("", value: $prescribedValue, format: .number)
+                    }
+                }
+            }
+            .padding()
+
+            HStack {
+                Button("Cancel") {
+                    isPresented = false
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Add") {
+                    guard let nodeID = selectedNodeID else { return }
+
+                    let constraint = Constraint(
+                        nodeID: nodeID,
+                        dofType: selectedDOF,
+                        constraintType: selectedType,
+                        value: prescribedValue
+                    )
+                    model.addConstraint(constraint)
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedNodeID == nil)
+            }
+            .padding()
+        }
+        .frame(width: 400, height: 350)
     }
 }
 
@@ -486,136 +751,123 @@ struct VisualizationView: View {
     var body: some View {
         Canvas { context, size in
             let padding: CGFloat = 40
+            let _ = size.width - 2 * padding
+            let _ = size.height - 2 * padding
 
-            // Draw coordinate system
-            drawCoordinateSystem(context: context, origin: CGPoint(x: padding, y: size.height - padding))
+            // Draw axes
+            var axesPath = Path()
+            axesPath.move(to: CGPoint(x: padding, y: padding))
+            axesPath.addLine(to: CGPoint(x: padding, y: size.height - padding))
+            axesPath.addLine(to: CGPoint(x: size.width - padding, y: size.height - padding))
+            context.stroke(axesPath, with: .color(.gray), lineWidth: 1)
+
+            // Draw nodes
+            for node in model.nodes {
+                let point = getNodePoint(node: node, size: size, padding: padding)
+                let nodeCircle = Path(ellipseIn: CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8))
+                context.fill(nodeCircle, with: .color(nodeColor(for: node.type)))
+                context.stroke(nodeCircle, with: .color(.black), lineWidth: 1)
+            }
 
             // Draw shaft elements
-            for shaft in model.shaftElements {
-                drawShaft(context: context, config: shaft, size: size, padding: padding)
+            for element in model.shaftElements {
+                guard let start = model.getNode(id: element.startNodeID),
+                      let end = model.getNode(id: element.endNodeID) else { continue }
+
+                let p1 = getNodePoint(node: start, size: size, padding: padding)
+                let p2 = getNodePoint(node: end, size: size, padding: padding)
+
+                var path = Path()
+                path.move(to: p1)
+                path.addLine(to: p2)
+                context.stroke(path, with: .color(.blue), lineWidth: 3)
             }
 
             // Draw disk elements
-            for disk in model.diskElements {
-                drawDisk(context: context, config: disk, size: size, padding: padding)
+            for element in model.diskElements {
+                guard let inner = model.getNode(id: element.innerNodeID),
+                      let outer = model.getNode(id: element.outerNodeID) else { continue }
+
+                let p1 = getNodePoint(node: inner, size: size, padding: padding)
+                let p2 = getNodePoint(node: outer, size: size, padding: padding)
+
+                var path = Path()
+                path.move(to: p1)
+                path.addLine(to: p2)
+                context.stroke(path, with: .color(.green), style: StrokeStyle(lineWidth: 2, dash: [5, 3]))
             }
 
             // Draw shell elements
-            for shell in model.shellElements {
-                drawShell(context: context, config: shell, size: size, padding: padding)
+            for element in model.shellElements {
+                guard let start = model.getNode(id: element.startNodeID),
+                      let end = model.getNode(id: element.endNodeID) else { continue }
+
+                let p1 = getNodePoint(node: start, size: size, padding: padding)
+                let p2 = getNodePoint(node: end, size: size, padding: padding)
+
+                var path = Path()
+                path.move(to: p1)
+                path.addLine(to: p2)
+                context.stroke(path, with: .color(.orange), lineWidth: 2)
+            }
+
+            // Draw constraints
+            for constraint in model.constraints {
+                guard let node = model.getNode(id: constraint.nodeID) else { continue }
+                let point = getNodePoint(node: node, size: size, padding: padding)
+
+                let constraintRect = Path(ellipseIn: CGRect(x: point.x - 6, y: point.y - 6, width: 12, height: 12))
+                context.stroke(constraintRect, with: .color(.purple), lineWidth: 2)
             }
         }
-        .overlay(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Legend").font(.caption).bold()
-                HStack {
-                    Rectangle()
-                        .fill(Color.blue.opacity(0.3))
-                        .frame(width: 20, height: 12)
-                    Text("Shaft").font(.caption)
-                }
-                HStack {
-                    Circle()
-                        .fill(Color.green.opacity(0.3))
-                        .frame(width: 12, height: 12)
-                    Text("Disk").font(.caption)
-                }
-                HStack {
-                    Rectangle()
-                        .fill(Color.orange.opacity(0.3))
-                        .frame(width: 20, height: 12)
-                    Text("Shell").font(.caption)
-                }
+    }
+
+    func getNodePoint(node: FEANode, size: CGSize, padding: CGFloat) -> CGPoint {
+        let width = size.width - 2 * padding
+        let height = size.height - 2 * padding
+
+        // Find bounds
+        let allZ = model.nodes.compactMap { $0.axialPosition }
+        let allR = model.nodes.compactMap { $0.radialPosition }
+
+        let minZ = allZ.min() ?? 0
+        let maxZ = allZ.max() ?? 1000
+        let minR = allR.min() ?? 0
+        let maxR = allR.max() ?? 500
+
+        let x: CGFloat
+        let y: CGFloat
+
+        switch node.type {
+        case .shaft, .shell:
+            if let z = node.axialPosition {
+                let normalizedZ = maxZ > minZ ? (z - minZ) / (maxZ - minZ) : 0.5
+                x = padding + CGFloat(normalizedZ) * width
+                y = size.height - padding  // On axis
+            } else {
+                x = padding
+                y = size.height - padding
             }
-            .padding(8)
-            .background(.regularMaterial)
-            .cornerRadius(8)
-            .padding()
-        }
-    }
-
-    func drawCoordinateSystem(context: GraphicsContext, origin: CGPoint) {
-        let arrowLength: CGFloat = 30
-
-        // X axis (red)
-        var xPath = Path()
-        xPath.move(to: origin)
-        xPath.addLine(to: CGPoint(x: origin.x + arrowLength, y: origin.y))
-        context.stroke(xPath, with: .color(.red), lineWidth: 2)
-        context.draw(Text("x").foregroundColor(.red).font(.caption), at: CGPoint(x: origin.x + arrowLength + 10, y: origin.y))
-
-        // Y axis (green)
-        var yPath = Path()
-        yPath.move(to: origin)
-        yPath.addLine(to: CGPoint(x: origin.x, y: origin.y - arrowLength))
-        context.stroke(yPath, with: .color(.green), lineWidth: 2)
-        context.draw(Text("y").foregroundColor(.green).font(.caption), at: CGPoint(x: origin.x, y: origin.y - arrowLength - 10))
-    }
-
-    func drawShaft(context: GraphicsContext, config: ShaftConfig, size: CGSize, padding: CGFloat) {
-        let scale: CGFloat = 0.5
-        let centerY = size.height / 2
-        let startX = padding + config.startPosition * scale
-        let endX = padding + config.endPosition * scale
-        let halfDiameter = config.diameter * scale / 2
-
-        let path = Path { p in
-            p.move(to: CGPoint(x: startX, y: centerY - halfDiameter))
-            p.addLine(to: CGPoint(x: endX, y: centerY - halfDiameter))
-            p.addLine(to: CGPoint(x: endX, y: centerY + halfDiameter))
-            p.addLine(to: CGPoint(x: startX, y: centerY + halfDiameter))
-            p.closeSubpath()
+        case .disk:
+            if let r = node.radialPosition {
+                let normalizedR = maxR > minR ? (r - minR) / (maxR - minR) : 0.5
+                x = size.width / 2  // Center horizontally
+                y = size.height - padding - CGFloat(normalizedR) * height
+            } else {
+                x = size.width / 2
+                y = size.height - padding
+            }
         }
 
-        context.fill(path, with: .color(.blue.opacity(0.3)))
-        context.stroke(path, with: .color(.blue), lineWidth: 1.5)
+        return CGPoint(x: x, y: y)
     }
 
-    func drawDisk(context: GraphicsContext, config: DiskConfig, size: CGSize, padding: CGFloat) {
-        let scale: CGFloat = 0.5
-        let centerX = size.width / 2
-        let centerY = size.height / 2
-        let innerR = config.innerRadius * scale
-        let outerR = config.outerRadius * scale
-
-        // Draw as concentric circles
-        let outerCircle = Path(ellipseIn: CGRect(
-            x: centerX - outerR,
-            y: centerY - outerR,
-            width: outerR * 2,
-            height: outerR * 2
-        ))
-
-        context.fill(outerCircle, with: .color(.green.opacity(0.2)))
-        context.stroke(outerCircle, with: .color(.green), lineWidth: 1.5)
-
-        let innerCircle = Path(ellipseIn: CGRect(
-            x: centerX - innerR,
-            y: centerY - innerR,
-            width: innerR * 2,
-            height: innerR * 2
-        ))
-
-        context.stroke(innerCircle, with: .color(.green), style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
-    }
-
-    func drawShell(context: GraphicsContext, config: ShellConfig, size: CGSize, padding: CGFloat) {
-        let scale: CGFloat = 0.5
-        let centerY = size.height / 2
-        let startX = padding + config.startPosition * scale
-        let endX = padding + config.endPosition * scale
-        let radius = config.radius * scale
-
-        let path = Path { p in
-            p.move(to: CGPoint(x: startX, y: centerY - radius))
-            p.addLine(to: CGPoint(x: endX, y: centerY - radius))
-            p.addLine(to: CGPoint(x: endX, y: centerY + radius))
-            p.addLine(to: CGPoint(x: startX, y: centerY + radius))
-            p.closeSubpath()
+    func nodeColor(for type: NodeType) -> Color {
+        switch type {
+        case .shaft: return .blue
+        case .disk: return .green
+        case .shell: return .orange
         }
-
-        context.fill(path, with: .color(.orange.opacity(0.2)))
-        context.stroke(path, with: .color(.orange), lineWidth: 1.5)
     }
 }
 
@@ -626,55 +878,57 @@ struct ResultsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 if viewModel.isRunning {
-                    HStack {
-                        ProgressView()
-                        Text("Running analysis...")
+                    ProgressView("Running analysis...")
+                        .padding()
+                } else if let error = viewModel.error {
+                    GroupBox("Error") {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .font(.caption)
                     }
-                    .padding()
                 } else if let results = viewModel.results {
-                    GroupBox("Analysis Summary") {
+                    GroupBox("Analysis Complete") {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Text("Status:")
-                                Spacer()
-                                Text(results.success ? "✓ Success" : "✗ Failed")
-                                    .foregroundColor(results.success ? .green : .red)
                                     .bold()
+                                Text(results.success ? "✓ Converged" : "✗ Failed")
+                                    .foregroundColor(results.success ? .green : .red)
                             }
                             HStack {
-                                Text("Total DOFs:")
-                                Spacer()
+                                Text("DOFs:")
+                                    .bold()
                                 Text("\(results.totalDOFs)")
                             }
                             HStack {
                                 Text("Solve Time:")
-                                Spacer()
+                                    .bold()
                                 Text(String(format: "%.3f s", results.solveTime))
                             }
                         }
+                        .font(.caption)
                     }
 
-                    if let error = viewModel.errorMessage {
-                        GroupBox("Error") {
-                            Text(error)
-                                .foregroundColor(.red)
+                    if !results.solutionVector.isEmpty {
+                        GroupBox("Solution Vector") {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(Array(results.solutionVector.enumerated()), id: \.offset) { index, value in
+                                        Text("DOF \(index): \(value, specifier: "%.6e")")
+                                            .font(.system(.caption, design: .monospaced))
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 300)
                         }
                     }
                 } else {
-                    VStack(spacing: 16) {
-                        Image(systemName: "gearshape.2")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-                        Text("No results yet")
-                            .font(.headline)
-                        Text("Build a model and click 'Run Analysis'")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Text("No results yet")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding()
                 }
             }
             .padding()
@@ -685,32 +939,24 @@ struct ResultsView: View {
 // MARK: - View Model
 
 class FEAViewModel: ObservableObject {
-    @Published var isRunning = false
-    @Published var errorMessage: String?
     @Published var results: FEAResults?
+    @Published var isRunning = false
+    @Published var error: String?
 
     func runAnalysis(model: FEAModel) {
         isRunning = true
-        errorMessage = nil
-        results = nil
+        error = nil
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-
+        DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let results = try model.solve()
-
                 DispatchQueue.main.async {
                     self.results = results
                     self.isRunning = false
-
-                    if !results.success {
-                        self.errorMessage = "Solver failed to converge"
-                    }
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.errorMessage = error.localizedDescription
+                    self.error = error.localizedDescription
                     self.isRunning = false
                 }
             }
