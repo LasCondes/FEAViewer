@@ -9,14 +9,15 @@ let package = Package(
         .macOS(.v13)
     ],
     dependencies: [
-        .package(path: "../PulleySwift")
+        .package(path: "../PulleySwift"),
+        .package(url: "https://github.com/LasCondes/AxiSymFEA.git", from: "1.0.0")
     ],
     targets: [
         .executableTarget(
             name: "PulleyViewer",
             dependencies: [
                 .product(name: "PulleyCore", package: "PulleySwift"),
-                .product(name: "PulleyFEA", package: "PulleySwift")
+                .product(name: "AxiSymFEA", package: "AxiSymFEA")
             ]
         ),
     ]

@@ -1,5 +1,5 @@
 import SwiftUI
-import PulleyFEA
+import AxiSymFEA
 import PulleyCore
 
 @main
