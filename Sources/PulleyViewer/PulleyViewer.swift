@@ -270,6 +270,7 @@ struct GeometryView: View {
 
     func drawDeformedShape(context: GraphicsContext, startX: CGFloat, y: CGFloat, length: CGFloat, deflection: CGFloat) {
         // Cubic deflection curve for cantilever
+        // deflection is negative (downward), so we use it directly
         var deformedPath = Path()
         deformedPath.move(to: CGPoint(x: startX, y: y))
 
@@ -278,16 +279,18 @@ struct GeometryView: View {
             let x = startX + (CGFloat(i) / CGFloat(steps)) * length
             let t = CGFloat(i) / CGFloat(steps)
             // Cubic deflection: w = (F*L^3)/(3*EI) * (x/L)^2 * (3 - x/L)
+            // Use deflection directly (it's already negative for downward)
             let w = deflection * t * t * (3.0 - t)
             deformedPath.addLine(to: CGPoint(x: x, y: y + w))
         }
 
         context.stroke(deformedPath, with: .color(.blue), style: StrokeStyle(lineWidth: 3, dash: [5, 3]))
 
-        // Add legend
+        // Add legend (position below the beam for downward deflection)
+        let labelY = deflection < 0 ? y + abs(deflection) + 20 : y - 20
         context.draw(
             Text("Deformed (10x)").foregroundColor(.blue).font(.caption),
-            at: CGPoint(x: startX + length / 2, y: y + deflection + 20)
+            at: CGPoint(x: startX + length / 2, y: labelY)
         )
     }
 
