@@ -64,88 +64,105 @@ struct ContentView: View {
 // View Model
 class FEAViewModel: ObservableObject {
     @Published var isRunning = false
-    @Published var hasResults = false
+    @Published var errorMessage: String?
 
-    // Model properties
-    @Published var length: Double = 1000.0  // mm
-    @Published var diameter: Double = 50.0  // mm
-    @Published var load: Double = -1000.0  // N
+    // FEA Model
+    private var feaModel: CantileverBeamModel
 
-    // Results
-    @Published var endDeflection: Double = 0.0
-    @Published var endRotation: Double = 0.0
-    @Published var analyticalDeflection: Double = 0.0
-    @Published var error: Double = 0.0
+    // Published results
+    @Published var results: FEAResults?
 
-    // Material properties
-    let youngsModulus: Double = 210000.0  // MPa
-    let poissonsRatio: Double = 0.3
+    // Computed properties for UI binding
+    var parameters: CantileverBeamParameters {
+        feaModel.parameters
+    }
+
+    var hasResults: Bool {
+        results != nil
+    }
+
+    // Convenience accessors for results
+    var endDeflection: Double {
+        results?.endDeflection ?? 0.0
+    }
+
+    var endRotation: Double {
+        results?.endRotation ?? 0.0
+    }
+
+    var analyticalDeflection: Double {
+        results?.analyticalDeflection ?? 0.0
+    }
+
+    var error: Double {
+        results?.errorPercentage ?? 0.0
+    }
+
+    // Material properties (exposed for display)
+    var youngsModulus: Double {
+        parameters.youngsModulus
+    }
+
+    var poissonsRatio: Double {
+        parameters.poissonsRatio
+    }
+
+    var length: Double {
+        parameters.length
+    }
+
+    var diameter: Double {
+        parameters.diameter
+    }
+
+    var load: Double {
+        parameters.load
+    }
+
+    init() {
+        self.feaModel = CantileverBeamModel()
+    }
 
     func runAnalysis() {
         isRunning = true
-        hasResults = false
+        errorMessage = nil
 
         // Run FEA in background
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
-            // Create and run FEA model
-            let assembly = FEAssembly()
-
-            let element = ShaftElement(
-                diameter: self.diameter,
-                axialPositionStart: 0.0,
-                axialPositionEnd: self.length,
-                youngsModulus: self.youngsModulus,
-                poissonsRatio: self.poissonsRatio,
-                mode: 0,
-                model: .timoshenko
-            )
-
-            assembly.addElement(element)
-            assembly.assemble(mode: 0)
-
-            let node0 = element.nodes[0]
-            let node1 = element.nodes[1]
-
-            let node0DOFs = assembly.getDOFIndices(forNode: node0)
-            let node1DOFs = assembly.getDOFIndices(forNode: node1)
-
-            // Boundary conditions
-            assembly.fixDOF(node0DOFs[0])
-            assembly.fixDOF(node0DOFs[1])
-            assembly.fixDOF(node0DOFs[2])
-            assembly.fixDOF(node0DOFs[3])
-
-            // Apply load
-            assembly.applyForce(self.load, atDOF: node1DOFs[0])
-
-            // Solve
-            let success = assembly.solve()
-
-            if success {
-                let w1 = assembly.getDisplacement(atDOF: node1DOFs[0]) ?? 0.0
-                let gamma1 = assembly.getDisplacement(atDOF: node1DOFs[1]) ?? 0.0
-
-                // Calculate analytical solution
-                let I = Double.pi * pow(self.diameter, 4) / 64.0
-                let analytical = abs(self.load) * pow(self.length, 3) / (3.0 * self.youngsModulus * I)
+            do {
+                let results = try self.feaModel.solve()
 
                 // Update UI on main thread
                 DispatchQueue.main.async {
-                    self.endDeflection = w1
-                    self.endRotation = gamma1
-                    self.analyticalDeflection = analytical
-                    self.error = abs(abs(w1) - analytical) / analytical * 100.0
-                    self.hasResults = true
+                    self.results = results
                     self.isRunning = false
                 }
-            } else {
+            } catch {
                 DispatchQueue.main.async {
+                    self.errorMessage = error.localizedDescription
                     self.isRunning = false
                 }
             }
         }
+    }
+
+    // MARK: - Parameter Updates
+
+    func updateLength(_ length: Double) {
+        feaModel.updateLength(length)
+        results = nil
+    }
+
+    func updateDiameter(_ diameter: Double) {
+        feaModel.updateDiameter(diameter)
+        results = nil
+    }
+
+    func updateLoad(_ load: Double) {
+        feaModel.updateLoad(load)
+        results = nil
     }
 }
 
