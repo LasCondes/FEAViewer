@@ -1,113 +1,78 @@
-# PulleyViewer
+# FEAViewer
 
-A macOS application for visualizing finite element analysis (FEA) models and results from the PulleySwift library.
+**Interactive macOS Application for Axisymmetric Finite Element Analysis**
+
+FEAViewer is a modern SwiftUI application for building, visualizing, and analyzing axisymmetric FEA models using the [AxiSymFEA](https://github.com/LasCondes/AxiSymFEA) library.
 
 ## Features
 
-- **Interactive Model Visualization**: 2D visualization of shaft/beam models with:
-  - Fixed support indicators
-  - Applied loads (forces and moments)
-  - Coordinate system display
-  - Dimensional annotations
+- **Interactive Model Building**: Add, edit, and delete FEA elements visually
+- **Multi-Element Support**:
+  - Shaft elements (beam + bar, bending/axial/torsion)
+  - Disk elements (radial disk bending)
+  - Shell elements (cylindrical shells)
+- **Real-time Visualization**: 2D representation of FEA model geometry
+- **Material Configuration**: Edit Young's modulus, Poisson's ratio, density
+- **Analysis Execution**: Run FEA solver and view results
+- **Clean Architecture**: MVVM pattern with separated model/UI layers
 
-- **Deformed Shape Display**: Shows the deflected shape of the structure (amplified 10x for visibility)
+## Requirements
 
-- **Real-time FEA Analysis**: Runs FEA simulations using the PulleySwift engine
+- macOS 13.0+
+- Swift 6.2+
+- Xcode 15+ (for development)
 
-- **Results Display**: Shows:
-  - Displacement values
-  - Rotation values
-  - Comparison with analytical solutions
-  - Error percentage
+## Installation
 
-- **Validation**: Compares FEA results with classical beam theory (Euler-Bernoulli)
-
-## Example Model
-
-The app demonstrates a cantilever beam:
-- **Length**: 1000mm
-- **Diameter**: 50mm
-- **Material**: Steel (E = 210,000 MPa, ν = 0.3)
-- **Loading**: 1000N transverse load at free end
-- **Boundary Conditions**: Fixed support at left end
-
-## Building and Running
+### From Source
 
 ```bash
+git clone https://github.com/LasCondes/FEAViewer.git
+cd FEAViewer
 swift build
-swift run
+swift run FEAViewer
 ```
 
-Or open in Xcode:
+### Xcode
 
 ```bash
 open Package.swift
 ```
 
-## Requirements
+Then build and run from Xcode.
 
-- macOS 13.0 or later
-- Swift 6.2 or later
-- PulleySwift library (included as local dependency)
+## Usage
 
-## Architecture
+### Building a Model
 
-### UI Components
+1. **Add Elements**: Click the "Add" button for Shaft, Disk, or Shell elements
+2. **Configure Properties**: Edit dimensions, positions, and element-specific settings
+3. **Set Material**: Adjust Young's modulus and Poisson's ratio (default: Steel)
+4. **Run Analysis**: Click "Run Analysis" to solve the FEA system
+5. **View Results**: Check the results panel for DOF count, solve time, and success status
 
-- **ContentView**: Main split view with model visualization and results
-- **GeometryView**: Canvas-based 2D rendering of the FEA model
-- **ResultsView**: Scrollable results panel with grouped data
-- **FEAViewModel**: ObservableObject managing model state and FEA execution
+### Element Types
 
-### FEA Integration
+#### Shaft Elements
+- Diameter, Start Z, End Z positions
+- Euler-Bernoulli or Timoshenko beam models
+- DOFs: w, gamma, u, beta (bending, rotation, axial, torsion)
 
-The app integrates with PulleySwift's FEA engine:
+#### Disk Elements
+- Inner/Outer radius, thickness variation
+- Radial disk bending (TMB equations)
+- DOFs: u, v, w, phi (radial, tangential, transverse, rotation)
 
-```swift
-let assembly = FEAssembly()
-let element = ShaftElement(...)
-assembly.addElement(element)
-assembly.assemble(mode: 0)
-
-// Apply boundary conditions
-assembly.fixDOF(...)
-
-// Apply loads
-assembly.applyForce(...)
-
-// Solve
-assembly.solve()
-
-// Extract results
-assembly.getDisplacement(atDOF: ...)
-```
-
-### Visualization Features
-
-- **Undeformed geometry**: Gray solid outline
-- **Deformed geometry**: Blue dashed curve (10x amplification)
-- **Fixed support**: Black hatched wall symbol
-- **Applied loads**: Red arrows with magnitude labels
-- **Dimensions**: Gray dimension lines with values
-
-## Screenshots
-
-The app features:
-- Left panel: Interactive model visualization with parameter overlay
-- Right panel: Results with displacement values, validation, and theory
-
-## Future Enhancements
-
-Potential additions:
-- Interactive parameter editing (sliders for length, diameter, load)
-- Multiple load cases
-- Export results to CSV/JSON
-- 3D visualization using SceneKit or RealityKit
-- Animation of deformation
-- Stress contour plots
-- Multiple element types (disk, shell)
-- Support for complex assemblies with multiple elements
+#### Shell Elements
+- Radius, thickness, axial extent
+- Ventsel-Krauthammer or TWK shell models
+- DOFs: u, v, w, phi
 
 ## License
 
-Part of the PulleySwift project - FEA for conveyor belt pulley design.
+MIT License
+
+## Related Projects
+
+- **[AxiSymFEA](https://github.com/LasCondes/AxiSymFEA)** - FEA library
+- **[PulleySwift](https://github.com/LasCondes/PulleySwift)** - Pulley analysis tools
