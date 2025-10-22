@@ -187,12 +187,16 @@ struct GeometryView: View {
 
             // Draw deformed shape if results available
             if viewModel.hasResults {
+                // Convert physical deflection to screen coordinates
+                // Physical: negative = downward, Screen: positive y = downward
+                // So we negate to flip the sign
+                let screenDeflection = -viewModel.endDeflection * scale * 10  // Amplify for visibility
                 drawDeformedShape(
                     context: context,
                     startX: beamStartX,
                     y: beamY,
                     length: beamLength,
-                    deflection: viewModel.endDeflection * scale * 10  // Amplify for visibility
+                    deflection: screenDeflection
                 )
             }
 
@@ -270,7 +274,7 @@ struct GeometryView: View {
 
     func drawDeformedShape(context: GraphicsContext, startX: CGFloat, y: CGFloat, length: CGFloat, deflection: CGFloat) {
         // Cubic deflection curve for cantilever
-        // deflection is negative (downward), so we use it directly
+        // deflection is in screen coordinates (positive = downward)
         var deformedPath = Path()
         deformedPath.move(to: CGPoint(x: startX, y: y))
 
@@ -279,15 +283,14 @@ struct GeometryView: View {
             let x = startX + (CGFloat(i) / CGFloat(steps)) * length
             let t = CGFloat(i) / CGFloat(steps)
             // Cubic deflection: w = (F*L^3)/(3*EI) * (x/L)^2 * (3 - x/L)
-            // Use deflection directly (it's already negative for downward)
             let w = deflection * t * t * (3.0 - t)
             deformedPath.addLine(to: CGPoint(x: x, y: y + w))
         }
 
         context.stroke(deformedPath, with: .color(.blue), style: StrokeStyle(lineWidth: 3, dash: [5, 3]))
 
-        // Add legend (position below the beam for downward deflection)
-        let labelY = deflection < 0 ? y + abs(deflection) + 20 : y - 20
+        // Add legend (position based on deflection direction)
+        let labelY = deflection > 0 ? y + deflection + 20 : y + deflection - 20
         context.draw(
             Text("Deformed (10x)").foregroundColor(.blue).font(.caption),
             at: CGPoint(x: startX + length / 2, y: labelY)
