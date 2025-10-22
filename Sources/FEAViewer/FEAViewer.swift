@@ -82,6 +82,7 @@ struct ContentView: View {
 
 struct ModelBuilderView: View {
     @ObservedObject var model: FEAModel
+    @State private var showingAddConstraint = false
 
     var body: some View {
         ScrollView {
@@ -158,8 +159,143 @@ struct ModelBuilderView: View {
                         }
                     }
                 }
+
+                // Constraints
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Constraints")
+                                .font(.headline)
+                            Spacer()
+                            Button(action: {
+                                showingAddConstraint = true
+                            }) {
+                                Label("Add", systemImage: "plus.circle")
+                            }
+                        }
+
+                        ForEach(model.constraints) { constraint in
+                            ConstraintRow(model: model, constraint: constraint)
+                        }
+
+                        if model.constraints.isEmpty {
+                            Text("No constraints defined")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.vertical, 4)
+                        }
+                    }
+                }
             }
             .padding()
+        }
+        .sheet(isPresented: $showingAddConstraint) {
+            AddConstraintSheet(model: model, isPresented: $showingAddConstraint)
+        }
+    }
+}
+
+// MARK: - Add Constraint Sheet
+
+struct AddConstraintSheet: View {
+    @ObservedObject var model: FEAModel
+    @Binding var isPresented: Bool
+
+    @State private var selectedElementIndex = 0
+    @State private var selectedLocation: ConstraintLocation = .shaftStart
+    @State private var selectedDOF: DOFType = .w
+    @State private var selectedType: ConstraintType = .fixed
+    @State private var prescribedValue: Double = 0.0
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Add Constraint")
+                .font(.title2)
+                .bold()
+
+            Form {
+                Section("Location") {
+                    Picker("Element Type", selection: $selectedLocation) {
+                        if !model.shaftElements.isEmpty {
+                            Text("Shaft Start").tag(ConstraintLocation.shaftStart)
+                            Text("Shaft End").tag(ConstraintLocation.shaftEnd)
+                        }
+                        if !model.diskElements.isEmpty {
+                            Text("Disk Inner").tag(ConstraintLocation.diskInner)
+                            Text("Disk Outer").tag(ConstraintLocation.diskOuter)
+                        }
+                        if !model.shellElements.isEmpty {
+                            Text("Shell Start").tag(ConstraintLocation.shellStart)
+                            Text("Shell End").tag(ConstraintLocation.shellEnd)
+                        }
+                    }
+
+                    Picker("Element Index", selection: $selectedElementIndex) {
+                        ForEach(0..<maxElementCount, id: \.self) { index in
+                            Text("#\(index)").tag(index)
+                        }
+                    }
+                }
+
+                Section("DOF") {
+                    Picker("Degree of Freedom", selection: $selectedDOF) {
+                        ForEach(model.getAvailableDOFs(for: selectedLocation), id: \.self) { dof in
+                            Text(dof.displayName).tag(dof)
+                        }
+                    }
+                }
+
+                Section("Constraint Type") {
+                    Picker("Type", selection: $selectedType) {
+                        Text("Fixed (= 0)").tag(ConstraintType.fixed)
+                        Text("Prescribed").tag(ConstraintType.prescribed)
+                    }
+
+                    if selectedType == .prescribed {
+                        HStack {
+                            Text("Value:")
+                            TextField("", value: $prescribedValue, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+
+            HStack {
+                Button("Cancel") {
+                    isPresented = false
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Add") {
+                    let constraint = Constraint(
+                        elementIndex: selectedElementIndex,
+                        location: selectedLocation,
+                        dofType: selectedDOF,
+                        constraintType: selectedType,
+                        value: prescribedValue
+                    )
+                    model.addConstraint(constraint)
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+        }
+        .padding()
+        .frame(width: 400, height: 500)
+    }
+
+    private var maxElementCount: Int {
+        switch selectedLocation {
+        case .shaftStart, .shaftEnd:
+            return model.shaftElements.count
+        case .diskInner, .diskOuter:
+            return model.diskElements.count
+        case .shellStart, .shellEnd:
+            return model.shellElements.count
         }
     }
 }
@@ -311,6 +447,32 @@ struct ShellElementRow: View {
         }
         .padding(8)
         .background(Color.orange.opacity(0.1))
+        .cornerRadius(4)
+    }
+}
+
+struct ConstraintRow: View {
+    @ObservedObject var model: FEAModel
+    let constraint: Constraint
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: "pin.fill")
+                    .foregroundColor(.purple)
+                    .font(.caption)
+                Text(constraint.description)
+                    .font(.caption)
+                Spacer()
+                Button(action: { model.deleteConstraint(constraint) }) {
+                    Image(systemName: "trash")
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .background(Color.purple.opacity(0.1))
         .cornerRadius(4)
     }
 }
