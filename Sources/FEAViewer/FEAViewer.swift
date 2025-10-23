@@ -7,7 +7,6 @@ struct FEAViewerApp: App {
         WindowGroup {
             ContentView()
         }
-        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1600, height: 900)
     }
 }
