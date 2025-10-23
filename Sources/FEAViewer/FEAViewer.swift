@@ -255,14 +255,9 @@ struct AddNodeSheet: View {
     @ObservedObject var model: FEAModel
     @Binding var isPresented: Bool
 
-    @State private var x: Double = 0.0
-    @State private var r: Double = 0.0
+    @State private var xText: String = "0"
+    @State private var rText: String = "0"
     @State private var label: String = ""
-    @FocusState private var focusedField: Field?
-
-    enum Field: Hashable {
-        case x, r, label
-    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -274,18 +269,16 @@ struct AddNodeSheet: View {
                 HStack {
                     Text("Axial (x):")
                         .frame(width: 100, alignment: .leading)
-                    TextField("0", value: $x, format: .number)
+                    TextField("0", text: $xText)
                         .textFieldStyle(.roundedBorder)
-                        .focused($focusedField, equals: .x)
                     Text("mm")
                 }
 
                 HStack {
                     Text("Radial (r):")
                         .frame(width: 100, alignment: .leading)
-                    TextField("0", value: $r, format: .number)
+                    TextField("0", text: $rText)
                         .textFieldStyle(.roundedBorder)
-                        .focused($focusedField, equals: .r)
                     Text("mm")
                 }
 
@@ -294,7 +287,6 @@ struct AddNodeSheet: View {
                         .frame(width: 100, alignment: .leading)
                     TextField("optional", text: $label)
                         .textFieldStyle(.roundedBorder)
-                        .focused($focusedField, equals: .label)
                 }
             }
             .padding()
@@ -306,6 +298,8 @@ struct AddNodeSheet: View {
                 .keyboardShortcut(.cancelAction)
 
                 Button("Add") {
+                    let x = Double(xText) ?? 0.0
+                    let r = Double(rText) ?? 0.0
                     let node = FEANode(x: x, r: r, label: label)
                     model.addNode(node)
                     isPresented = false
@@ -316,13 +310,6 @@ struct AddNodeSheet: View {
             .padding(.bottom)
         }
         .frame(width: 400, height: 250)
-        .onAppear {
-            // Activate the window and set focus
-            NSApp.activate(ignoringOtherApps: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                focusedField = .x
-            }
-        }
     }
 }
 
