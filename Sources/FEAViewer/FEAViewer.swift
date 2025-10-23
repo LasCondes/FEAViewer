@@ -317,7 +317,8 @@ struct AddNodeSheet: View {
         }
         .frame(width: 400, height: 250)
         .onAppear {
-            // Set focus to first field when sheet appears
+            // Activate the window and set focus
+            NSApp.activate(ignoringOtherApps: true)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 focusedField = .x
             }
