@@ -258,6 +258,11 @@ struct AddNodeSheet: View {
     @State private var x: Double = 0.0
     @State private var r: Double = 0.0
     @State private var label: String = ""
+    @FocusState private var focusedField: Field?
+
+    enum Field: Hashable {
+        case x, r, label
+    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -271,6 +276,7 @@ struct AddNodeSheet: View {
                         .frame(width: 100, alignment: .leading)
                     TextField("0", value: $x, format: .number)
                         .textFieldStyle(.roundedBorder)
+                        .focused($focusedField, equals: .x)
                     Text("mm")
                 }
 
@@ -279,6 +285,7 @@ struct AddNodeSheet: View {
                         .frame(width: 100, alignment: .leading)
                     TextField("0", value: $r, format: .number)
                         .textFieldStyle(.roundedBorder)
+                        .focused($focusedField, equals: .r)
                     Text("mm")
                 }
 
@@ -287,6 +294,7 @@ struct AddNodeSheet: View {
                         .frame(width: 100, alignment: .leading)
                     TextField("optional", text: $label)
                         .textFieldStyle(.roundedBorder)
+                        .focused($focusedField, equals: .label)
                 }
             }
             .padding()
@@ -308,6 +316,12 @@ struct AddNodeSheet: View {
             .padding(.bottom)
         }
         .frame(width: 400, height: 250)
+        .onAppear {
+            // Set focus to first field when sheet appears
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedField = .x
+            }
+        }
     }
 }
 
