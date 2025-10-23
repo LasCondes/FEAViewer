@@ -3,50 +3,17 @@ import AxiSymFEA
 
 // MARK: - Node Configuration
 
-enum NodeType: String, Codable {
-    case shaft      // On shaft axis (axial position only)
-    case disk       // On disk (radial position)
-    case shell      // On shell (axial position)
-
-    var displayName: String {
-        switch self {
-        case .shaft: return "Shaft Node"
-        case .disk: return "Disk Node"
-        case .shell: return "Shell Node"
-        }
-    }
-}
-
 struct FEANode: Identifiable, Codable {
     let id = UUID()
-    var type: NodeType
-    var axialPosition: Double?      // For shaft/shell nodes (z-coordinate)
-    var radialPosition: Double?     // For disk nodes (r-coordinate)
+    var x: Double = 0.0             // Axial coordinate (mm)
+    var r: Double = 0.0             // Radial coordinate (mm)
     var label: String = ""
-
-    // Convenience initializers
-    static func shaft(z: Double, label: String = "") -> FEANode {
-        FEANode(type: .shaft, axialPosition: z, radialPosition: nil, label: label)
-    }
-
-    static func disk(r: Double, label: String = "") -> FEANode {
-        FEANode(type: .disk, axialPosition: nil, radialPosition: r, label: label)
-    }
-
-    static func shell(z: Double, label: String = "") -> FEANode {
-        FEANode(type: .shell, axialPosition: z, radialPosition: nil, label: label)
-    }
 
     var description: String {
         if !label.isEmpty {
             return label
         }
-        switch type {
-        case .shaft, .shell:
-            return "z = \(axialPosition ?? 0)"
-        case .disk:
-            return "r = \(radialPosition ?? 0)"
-        }
+        return String(format: "(x=%.1f, r=%.1f)", x, r)
     }
 }
 
@@ -114,7 +81,7 @@ enum DOFType: String, Codable, CaseIterable {
     case u       // Axial displacement
     case beta    // Torsional rotation
 
-    // Disk/Shell DOFs (in addition to u, v, w)
+    // Disk/Shell DOFs
     case v       // Tangential displacement
     case phi     // Rotation
 
@@ -126,16 +93,6 @@ enum DOFType: String, Codable, CaseIterable {
         case .beta: return "β (torsion)"
         case .v: return "v (tangential)"
         case .phi: return "φ (rotation)"
-        }
-    }
-
-    // Get available DOFs for a node type
-    static func availableDOFs(for nodeType: NodeType) -> [DOFType] {
-        switch nodeType {
-        case .shaft:
-            return [.w, .gamma, .u, .beta]
-        case .disk, .shell:
-            return [.u, .v, .w, .phi]
         }
     }
 }
@@ -261,6 +218,45 @@ class FEAModel: ObservableObject {
         return Set(constraints.filter { $0.nodeID == nodeID }.map { $0.dofType })
     }
 
+    func getAvailableDOFs(for nodeID: UUID) -> [DOFType] {
+        // Determine which DOFs exist at this node based on connected elements
+        var dofs = Set<DOFType>()
+
+        // Check if node is used by shaft elements
+        let usedByShaft = shaftElements.contains { $0.startNodeID == nodeID || $0.endNodeID == nodeID }
+        if usedByShaft {
+            dofs.insert(.w)
+            dofs.insert(.gamma)
+            dofs.insert(.u)
+            dofs.insert(.beta)
+        }
+
+        // Check if node is used by disk elements
+        let usedByDisk = diskElements.contains { $0.innerNodeID == nodeID || $0.outerNodeID == nodeID }
+        if usedByDisk {
+            dofs.insert(.u)
+            dofs.insert(.v)
+            dofs.insert(.w)
+            dofs.insert(.phi)
+        }
+
+        // Check if node is used by shell elements
+        let usedByShell = shellElements.contains { $0.startNodeID == nodeID || $0.endNodeID == nodeID }
+        if usedByShell {
+            dofs.insert(.u)
+            dofs.insert(.v)
+            dofs.insert(.w)
+            dofs.insert(.phi)
+        }
+
+        // If node not used by any elements, return all possible DOFs
+        if dofs.isEmpty {
+            return DOFType.allCases
+        }
+
+        return Array(dofs).sorted { $0.rawValue < $1.rawValue }
+    }
+
     // MARK: - FEA Execution
 
     func solve() throws -> FEAResults {
@@ -278,16 +274,14 @@ class FEAModel: ObservableObject {
         // Add shaft elements
         for config in shaftElements {
             guard let startNode = getNode(id: config.startNodeID),
-                  let endNode = getNode(id: config.endNodeID),
-                  let startZ = startNode.axialPosition,
-                  let endZ = endNode.axialPosition else {
+                  let endNode = getNode(id: config.endNodeID) else {
                 throw FEAError.invalidElement("Shaft element has invalid nodes")
             }
 
             let element = ShaftElement(
                 diameter: config.diameter,
-                axialPositionStart: startZ,
-                axialPositionEnd: endZ,
+                axialPositionStart: startNode.x,
+                axialPositionEnd: endNode.x,
                 youngsModulus: material.youngsModulus,
                 poissonsRatio: material.poissonsRatio,
                 mode: 0,
@@ -300,15 +294,13 @@ class FEAModel: ObservableObject {
         // Add disk elements
         for config in diskElements {
             guard let innerNode = getNode(id: config.innerNodeID),
-                  let outerNode = getNode(id: config.outerNodeID),
-                  let innerR = innerNode.radialPosition,
-                  let outerR = outerNode.radialPosition else {
+                  let outerNode = getNode(id: config.outerNodeID) else {
                 throw FEAError.invalidElement("Disk element has invalid nodes")
             }
 
             let element = DiskElement(
-                innerRadius: innerR,
-                outerRadius: outerR,
+                innerRadius: innerNode.r,
+                outerRadius: outerNode.r,
                 thicknessBegin: config.thicknessBegin,
                 thicknessEnd: config.thicknessEnd,
                 youngsModulus: material.youngsModulus,
@@ -323,17 +315,15 @@ class FEAModel: ObservableObject {
         // Add shell elements
         for config in shellElements {
             guard let startNode = getNode(id: config.startNodeID),
-                  let endNode = getNode(id: config.endNodeID),
-                  let startZ = startNode.axialPosition,
-                  let endZ = endNode.axialPosition else {
+                  let endNode = getNode(id: config.endNodeID) else {
                 throw FEAError.invalidElement("Shell element has invalid nodes")
             }
 
             let element = ShellElement(
                 radius: config.radius,
                 thickness: config.thickness,
-                axialPositionStart: startZ,
-                axialPositionEnd: endZ,
+                axialPositionStart: startNode.x,
+                axialPositionEnd: endNode.x,
                 youngsModulus: material.youngsModulus,
                 poissonsRatio: material.poissonsRatio,
                 useNumericalIntegration: false,
@@ -392,7 +382,7 @@ class FEAModel: ObservableObject {
     private func applyConstraints(assembly: FEAssembly, nodeMap: [UUID: Node]) throws {
         // Apply each constraint directly using node references
         for constraint in constraints {
-            guard let feaNode = getNode(id: constraint.nodeID) else {
+            guard let _ = getNode(id: constraint.nodeID) else {
                 throw FEAError.invalidConstraint("Constraint references non-existent node")
             }
 
@@ -401,7 +391,10 @@ class FEAModel: ObservableObject {
             }
 
             let dofIndices = assembly.getDOFIndices(forNode: axiSymNode)
-            let dofIndex = try getDOFIndex(for: constraint.dofType, in: feaNode.type)
+
+            // Determine element type from which element uses this node
+            let elementType = getElementTypeForNode(constraint.nodeID)
+            let dofIndex = try getDOFIndex(for: constraint.dofType, elementType: elementType)
 
             guard dofIndex < dofIndices.count else {
                 throw FEAError.invalidConstraint("DOF index out of range")
@@ -418,9 +411,23 @@ class FEAModel: ObservableObject {
         }
     }
 
-    private func getDOFIndex(for dofType: DOFType, in nodeType: NodeType) throws -> Int {
-        // Map DOF type to index based on node type
-        switch nodeType {
+    private func getElementTypeForNode(_ nodeID: UUID) -> FEAElementType? {
+        // Check which type of element uses this node
+        if shaftElements.contains(where: { $0.startNodeID == nodeID || $0.endNodeID == nodeID }) {
+            return .shaft
+        }
+        if diskElements.contains(where: { $0.innerNodeID == nodeID || $0.outerNodeID == nodeID }) {
+            return .disk
+        }
+        if shellElements.contains(where: { $0.startNodeID == nodeID || $0.endNodeID == nodeID }) {
+            return .shell
+        }
+        return nil
+    }
+
+    private func getDOFIndex(for dofType: DOFType, elementType: FEAElementType?) throws -> Int {
+        // Map DOF type to index based on element type
+        switch elementType {
         case .shaft:
             // Shaft DOF order: [w, gamma, u, beta]
             switch dofType {
@@ -429,7 +436,7 @@ class FEAModel: ObservableObject {
             case .u: return 2
             case .beta: return 3
             default:
-                throw FEAError.invalidConstraint("Invalid DOF type for shaft node")
+                throw FEAError.invalidConstraint("Invalid DOF type for shaft element")
             }
 
         case .disk, .shell:
@@ -440,7 +447,17 @@ class FEAModel: ObservableObject {
             case .w: return 2
             case .phi: return 3
             default:
-                throw FEAError.invalidConstraint("Invalid DOF type for disk/shell node")
+                throw FEAError.invalidConstraint("Invalid DOF type for disk/shell element")
+            }
+
+        case nil:
+            // Node not connected to any element, assume disk/shell DOF ordering
+            switch dofType {
+            case .u: return 0
+            case .v: return 1
+            case .w: return 2
+            case .phi: return 3
+            default: return 0
             }
         }
     }

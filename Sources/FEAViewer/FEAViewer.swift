@@ -223,11 +223,15 @@ struct NodeRow: View {
 
     var body: some View {
         HStack {
-            Image(systemName: nodeIcon)
-                .foregroundColor(nodeColor)
+            Image(systemName: "circle.fill")
+                .foregroundColor(.blue)
+                .frame(width: 12)
             VStack(alignment: .leading, spacing: 2) {
-                Text(node.label.isEmpty ? node.type.displayName : node.label)
-                    .font(.caption)
+                if !node.label.isEmpty {
+                    Text(node.label)
+                        .font(.caption)
+                        .bold()
+                }
                 Text(node.description)
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -240,24 +244,8 @@ struct NodeRow: View {
             .buttonStyle(.plain)
         }
         .padding(6)
-        .background(nodeColor.opacity(0.1))
+        .background(Color.blue.opacity(0.1))
         .cornerRadius(4)
-    }
-
-    var nodeIcon: String {
-        switch node.type {
-        case .shaft: return "circle.fill"
-        case .disk: return "circle.circle"
-        case .shell: return "circle.dotted"
-        }
-    }
-
-    var nodeColor: Color {
-        switch node.type {
-        case .shaft: return .blue
-        case .disk: return .green
-        case .shell: return .orange
-        }
     }
 }
 
@@ -267,9 +255,8 @@ struct AddNodeSheet: View {
     @ObservedObject var model: FEAModel
     @Binding var isPresented: Bool
 
-    @State private var nodeType: NodeType = .shaft
-    @State private var axialPosition: Double = 0.0
-    @State private var radialPosition: Double = 100.0
+    @State private var x: Double = 0.0
+    @State private var r: Double = 0.0
     @State private var label: String = ""
 
     var body: some View {
@@ -279,31 +266,24 @@ struct AddNodeSheet: View {
                 .bold()
 
             Form {
-                Picker("Node Type", selection: $nodeType) {
-                    Text("Shaft").tag(NodeType.shaft)
-                    Text("Disk").tag(NodeType.disk)
-                    Text("Shell").tag(NodeType.shell)
-                }
-
-                if nodeType == .shaft || nodeType == .shell {
-                    HStack {
-                        Text("Axial Position (z):")
-                        TextField("", value: $axialPosition, format: .number)
-                        Text("mm")
-                    }
-                }
-
-                if nodeType == .disk {
-                    HStack {
-                        Text("Radial Position (r):")
-                        TextField("", value: $radialPosition, format: .number)
-                        Text("mm")
-                    }
+                HStack {
+                    Text("Axial (x):")
+                        .frame(width: 100, alignment: .leading)
+                    TextField("", value: $x, format: .number)
+                    Text("mm")
                 }
 
                 HStack {
-                    Text("Label (optional):")
-                    TextField("", text: $label)
+                    Text("Radial (r):")
+                        .frame(width: 100, alignment: .leading)
+                    TextField("", value: $r, format: .number)
+                    Text("mm")
+                }
+
+                HStack {
+                    Text("Label:")
+                        .frame(width: 100, alignment: .leading)
+                    TextField("optional", text: $label)
                 }
             }
             .padding()
@@ -315,15 +295,7 @@ struct AddNodeSheet: View {
                 .keyboardShortcut(.cancelAction)
 
                 Button("Add") {
-                    let node: FEANode
-                    switch nodeType {
-                    case .shaft:
-                        node = .shaft(z: axialPosition, label: label)
-                    case .disk:
-                        node = .disk(r: radialPosition, label: label)
-                    case .shell:
-                        node = .shell(z: axialPosition, label: label)
-                    }
+                    let node = FEANode(x: x, r: r, label: label)
                     model.addNode(node)
                     isPresented = false
                 }
@@ -332,7 +304,7 @@ struct AddNodeSheet: View {
             }
             .padding()
         }
-        .frame(width: 400, height: 300)
+        .frame(width: 400, height: 250)
     }
 }
 
@@ -491,15 +463,15 @@ struct AddElementSheet: View {
                 if elementType == .shaft {
                     Picker("Start Node", selection: $startNodeID) {
                         Text("Select...").tag(nil as UUID?)
-                        ForEach(shaftNodes) { node in
-                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        ForEach(model.nodes) { node in
+                            Text(nodeLabel(node)).tag(node.id as UUID?)
                         }
                     }
 
                     Picker("End Node", selection: $endNodeID) {
                         Text("Select...").tag(nil as UUID?)
-                        ForEach(shaftNodes) { node in
-                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        ForEach(model.nodes) { node in
+                            Text(nodeLabel(node)).tag(node.id as UUID?)
                         }
                     }
 
@@ -513,15 +485,15 @@ struct AddElementSheet: View {
                 if elementType == .disk {
                     Picker("Inner Node", selection: $startNodeID) {
                         Text("Select...").tag(nil as UUID?)
-                        ForEach(diskNodes) { node in
-                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        ForEach(model.nodes) { node in
+                            Text(nodeLabel(node)).tag(node.id as UUID?)
                         }
                     }
 
                     Picker("Outer Node", selection: $endNodeID) {
                         Text("Select...").tag(nil as UUID?)
-                        ForEach(diskNodes) { node in
-                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        ForEach(model.nodes) { node in
+                            Text(nodeLabel(node)).tag(node.id as UUID?)
                         }
                     }
 
@@ -541,15 +513,15 @@ struct AddElementSheet: View {
                 if elementType == .shell {
                     Picker("Start Node", selection: $startNodeID) {
                         Text("Select...").tag(nil as UUID?)
-                        ForEach(shellNodes) { node in
-                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        ForEach(model.nodes) { node in
+                            Text(nodeLabel(node)).tag(node.id as UUID?)
                         }
                     }
 
                     Picker("End Node", selection: $endNodeID) {
                         Text("Select...").tag(nil as UUID?)
-                        ForEach(shellNodes) { node in
-                            Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                        ForEach(model.nodes) { node in
+                            Text(nodeLabel(node)).tag(node.id as UUID?)
                         }
                     }
 
@@ -608,16 +580,8 @@ struct AddElementSheet: View {
         .frame(width: 450, height: 450)
     }
 
-    var shaftNodes: [FEANode] {
-        model.nodes.filter { $0.type == .shaft }
-    }
-
-    var diskNodes: [FEANode] {
-        model.nodes.filter { $0.type == .disk }
-    }
-
-    var shellNodes: [FEANode] {
-        model.nodes.filter { $0.type == .shell }
+    func nodeLabel(_ node: FEANode) -> String {
+        node.label.isEmpty ? node.description : node.label
     }
 }
 
@@ -692,9 +656,9 @@ struct AddConstraintSheet: View {
                     }
                 }
 
-                if let nodeID = selectedNodeID, let node = model.getNode(id: nodeID) {
+                if let nodeID = selectedNodeID {
                     Picker("DOF", selection: $selectedDOF) {
-                        ForEach(DOFType.availableDOFs(for: node.type), id: \.self) { dof in
+                        ForEach(model.getAvailableDOFs(for: nodeID), id: \.self) { dof in
                             Text(dof.displayName).tag(dof)
                         }
                     }
@@ -765,7 +729,7 @@ struct VisualizationView: View {
             for node in model.nodes {
                 let point = getNodePoint(node: node, size: size, padding: padding)
                 let nodeCircle = Path(ellipseIn: CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8))
-                context.fill(nodeCircle, with: .color(nodeColor(for: node.type)))
+                context.fill(nodeCircle, with: .color(.blue))
                 context.stroke(nodeCircle, with: .color(.black), lineWidth: 1)
             }
 
@@ -827,47 +791,23 @@ struct VisualizationView: View {
         let height = size.height - 2 * padding
 
         // Find bounds
-        let allZ = model.nodes.compactMap { $0.axialPosition }
-        let allR = model.nodes.compactMap { $0.radialPosition }
+        let allX = model.nodes.map { $0.x }
+        let allR = model.nodes.map { $0.r }
 
-        let minZ = allZ.min() ?? 0
-        let maxZ = allZ.max() ?? 1000
+        let minX = allX.min() ?? 0
+        let maxX = allX.max() ?? 1000
         let minR = allR.min() ?? 0
         let maxR = allR.max() ?? 500
 
-        let x: CGFloat
-        let y: CGFloat
+        // Normalize coordinates
+        let normalizedX = maxX > minX ? (node.x - minX) / (maxX - minX) : 0.5
+        let normalizedR = maxR > minR ? (node.r - minR) / (maxR - minR) : 0.5
 
-        switch node.type {
-        case .shaft, .shell:
-            if let z = node.axialPosition {
-                let normalizedZ = maxZ > minZ ? (z - minZ) / (maxZ - minZ) : 0.5
-                x = padding + CGFloat(normalizedZ) * width
-                y = size.height - padding  // On axis
-            } else {
-                x = padding
-                y = size.height - padding
-            }
-        case .disk:
-            if let r = node.radialPosition {
-                let normalizedR = maxR > minR ? (r - minR) / (maxR - minR) : 0.5
-                x = size.width / 2  // Center horizontally
-                y = size.height - padding - CGFloat(normalizedR) * height
-            } else {
-                x = size.width / 2
-                y = size.height - padding
-            }
-        }
+        // Map to screen coordinates
+        let screenX = padding + CGFloat(normalizedX) * width
+        let screenY = size.height - padding - CGFloat(normalizedR) * height
 
-        return CGPoint(x: x, y: y)
-    }
-
-    func nodeColor(for type: NodeType) -> Color {
-        switch type {
-        case .shaft: return .blue
-        case .disk: return .green
-        case .shell: return .orange
-        }
+        return CGPoint(x: screenX, y: screenY)
     }
 }
 
