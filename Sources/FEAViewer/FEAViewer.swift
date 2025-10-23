@@ -1,8 +1,11 @@
 import SwiftUI
+import AppKit
 import AxiSymFEA
 
 @main
 struct FEAViewerApp: App {
+    @NSApplicationDelegateAdaptor(FEAAppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -74,6 +77,15 @@ struct ContentView: View {
             }
             .frame(minWidth: 300)
         }
+    }
+}
+
+final class FEAAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        app.activate(ignoringOtherApps: true)
+        app.mainWindow?.makeKeyAndOrderFront(nil)
     }
 }
 
