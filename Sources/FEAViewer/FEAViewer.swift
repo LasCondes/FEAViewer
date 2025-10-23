@@ -115,16 +115,23 @@ struct ModelBuilderView: View {
                             Text("Nodes")
                                 .font(.headline)
                             Spacer()
-                            Button(action: { showingAddNode = true }) {
-                                Label("Add", systemImage: "plus.circle")
+                            Button(action: { showingAddNode.toggle() }) {
+                                Label(showingAddNode ? "Cancel" : "Add", systemImage: showingAddNode ? "xmark.circle" : "plus.circle")
                             }
+                        }
+
+                        if showingAddNode {
+                            AddNodeForm(model: model, isShowing: $showingAddNode)
+                                .padding(8)
+                                .background(Color.blue.opacity(0.05))
+                                .cornerRadius(8)
                         }
 
                         ForEach(model.nodes) { node in
                             NodeRow(model: model, node: node)
                         }
 
-                        if model.nodes.isEmpty {
+                        if model.nodes.isEmpty && !showingAddNode {
                             Text("No nodes defined")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
@@ -203,9 +210,6 @@ struct ModelBuilderView: View {
             }
             .padding()
         }
-        .sheet(isPresented: $showingAddNode) {
-            AddNodeSheet(model: model, isPresented: $showingAddNode)
-        }
         .sheet(isPresented: $showingAddElement) {
             AddElementSheet(model: model, isPresented: $showingAddElement)
         }
@@ -249,67 +253,64 @@ struct NodeRow: View {
     }
 }
 
-// MARK: - Add Node Sheet
+// MARK: - Add Node Form (Inline)
 
-struct AddNodeSheet: View {
+struct AddNodeForm: View {
     @ObservedObject var model: FEAModel
-    @Binding var isPresented: Bool
+    @Binding var isShowing: Bool
 
     @State private var xText: String = "0"
     @State private var rText: String = "0"
     @State private var label: String = ""
 
     var body: some View {
-        VStack(spacing: 20) {
-            Text("Add Node")
-                .font(.title2)
-                .bold()
+        VStack(alignment: .leading, spacing: 8) {
+            Text("New Node").font(.subheadline).bold()
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Axial (x):")
-                        .frame(width: 100, alignment: .leading)
-                    TextField("0", text: $xText)
-                        .textFieldStyle(.roundedBorder)
-                    Text("mm")
-                }
-
-                HStack {
-                    Text("Radial (r):")
-                        .frame(width: 100, alignment: .leading)
-                    TextField("0", text: $rText)
-                        .textFieldStyle(.roundedBorder)
-                    Text("mm")
-                }
-
-                HStack {
-                    Text("Label:")
-                        .frame(width: 100, alignment: .leading)
-                    TextField("optional", text: $label)
-                        .textFieldStyle(.roundedBorder)
-                }
+            HStack {
+                Text("x:")
+                    .frame(width: 60, alignment: .leading)
+                TextField("0", text: $xText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
+                Text("mm")
+                Spacer()
             }
-            .padding()
 
-            HStack(spacing: 12) {
-                Button("Cancel") {
-                    isPresented = false
-                }
-                .keyboardShortcut(.cancelAction)
+            HStack {
+                Text("r:")
+                    .frame(width: 60, alignment: .leading)
+                TextField("0", text: $rText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
+                Text("mm")
+                Spacer()
+            }
 
-                Button("Add") {
+            HStack {
+                Text("Label:")
+                    .frame(width: 60, alignment: .leading)
+                TextField("optional", text: $label)
+                    .textFieldStyle(.roundedBorder)
+                Spacer()
+            }
+
+            HStack {
+                Spacer()
+                Button("Add Node") {
                     let x = Double(xText) ?? 0.0
                     let r = Double(rText) ?? 0.0
                     let node = FEANode(x: x, r: r, label: label)
                     model.addNode(node)
-                    isPresented = false
+                    // Reset form
+                    xText = "0"
+                    rText = "0"
+                    label = ""
+                    isShowing = false
                 }
-                .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
             }
-            .padding(.bottom)
         }
-        .frame(width: 400, height: 250)
     }
 }
 
