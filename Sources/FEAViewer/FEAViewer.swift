@@ -466,14 +466,14 @@ struct AddElementSheet: View {
                 }
 
                 if elementType == .shaft {
-                    Picker("Start Node", selection: $startNodeID) {
+                    Picker("Node 1", selection: $startNodeID) {
                         Text("Select...").tag(nil as UUID?)
                         ForEach(model.nodes) { node in
                             Text(nodeLabel(node)).tag(node.id as UUID?)
                         }
                     }
 
-                    Picker("End Node", selection: $endNodeID) {
+                    Picker("Node 2", selection: $endNodeID) {
                         Text("Select...").tag(nil as UUID?)
                         ForEach(model.nodes) { node in
                             Text(nodeLabel(node)).tag(node.id as UUID?)
@@ -488,14 +488,14 @@ struct AddElementSheet: View {
                 }
 
                 if elementType == .disk {
-                    Picker("Inner Node", selection: $startNodeID) {
+                    Picker("Node 1", selection: $startNodeID) {
                         Text("Select...").tag(nil as UUID?)
                         ForEach(model.nodes) { node in
                             Text(nodeLabel(node)).tag(node.id as UUID?)
                         }
                     }
 
-                    Picker("Outer Node", selection: $endNodeID) {
+                    Picker("Node 2", selection: $endNodeID) {
                         Text("Select...").tag(nil as UUID?)
                         ForEach(model.nodes) { node in
                             Text(nodeLabel(node)).tag(node.id as UUID?)
@@ -516,14 +516,14 @@ struct AddElementSheet: View {
                 }
 
                 if elementType == .shell {
-                    Picker("Start Node", selection: $startNodeID) {
+                    Picker("Node 1", selection: $startNodeID) {
                         Text("Select...").tag(nil as UUID?)
                         ForEach(model.nodes) { node in
                             Text(nodeLabel(node)).tag(node.id as UUID?)
                         }
                     }
 
-                    Picker("End Node", selection: $endNodeID) {
+                    Picker("Node 2", selection: $endNodeID) {
                         Text("Select...").tag(nil as UUID?)
                         ForEach(model.nodes) { node in
                             Text(nodeLabel(node)).tag(node.id as UUID?)
@@ -552,22 +552,29 @@ struct AddElementSheet: View {
                 .keyboardShortcut(.cancelAction)
 
                 Button("Add") {
-                    guard let start = startNodeID, let end = endNodeID else { return }
+                    guard let node1ID = startNodeID, let node2ID = endNodeID else { return }
+                    guard let node1 = model.getNode(id: node1ID), let node2 = model.getNode(id: node2ID) else { return }
 
                     switch elementType {
                     case .shaft:
-                        model.addShaftElement(startNodeID: start, endNodeID: end)
+                        // Sort by x position (axial)
+                        let (startID, endID) = node1.x <= node2.x ? (node1ID, node2ID) : (node2ID, node1ID)
+                        model.addShaftElement(startNodeID: startID, endNodeID: endID)
                         if let index = model.shaftElements.indices.last {
                             model.shaftElements[index].diameter = diameter
                         }
                     case .disk:
-                        model.addDiskElement(innerNodeID: start, outerNodeID: end)
+                        // Sort by r position (radial) - smaller r is inner
+                        let (innerID, outerID) = node1.r <= node2.r ? (node1ID, node2ID) : (node2ID, node1ID)
+                        model.addDiskElement(innerNodeID: innerID, outerNodeID: outerID)
                         if let index = model.diskElements.indices.last {
                             model.diskElements[index].thicknessBegin = thicknessBegin
                             model.diskElements[index].thicknessEnd = thicknessEnd
                         }
                     case .shell:
-                        model.addShellElement(startNodeID: start, endNodeID: end)
+                        // Sort by x position (axial)
+                        let (startID, endID) = node1.x <= node2.x ? (node1ID, node2ID) : (node2ID, node1ID)
+                        model.addShellElement(startNodeID: startID, endNodeID: endID)
                         if let index = model.shellElements.indices.last {
                             model.shellElements[index].radius = radius
                             model.shellElements[index].thickness = thickness
