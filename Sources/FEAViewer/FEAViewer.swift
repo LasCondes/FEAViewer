@@ -260,23 +260,25 @@ struct AddNodeSheet: View {
     @State private var label: String = ""
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             Text("Add Node")
                 .font(.title2)
                 .bold()
 
-            Form {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("Axial (x):")
                         .frame(width: 100, alignment: .leading)
-                    TextField("", value: $x, format: .number)
+                    TextField("0", value: $x, format: .number)
+                        .textFieldStyle(.roundedBorder)
                     Text("mm")
                 }
 
                 HStack {
                     Text("Radial (r):")
                         .frame(width: 100, alignment: .leading)
-                    TextField("", value: $r, format: .number)
+                    TextField("0", value: $r, format: .number)
+                        .textFieldStyle(.roundedBorder)
                     Text("mm")
                 }
 
@@ -284,11 +286,12 @@ struct AddNodeSheet: View {
                     Text("Label:")
                         .frame(width: 100, alignment: .leading)
                     TextField("optional", text: $label)
+                        .textFieldStyle(.roundedBorder)
                 }
             }
             .padding()
 
-            HStack {
+            HStack(spacing: 12) {
                 Button("Cancel") {
                     isPresented = false
                 }
@@ -302,7 +305,7 @@ struct AddNodeSheet: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
             }
-            .padding()
+            .padding(.bottom)
         }
         .frame(width: 400, height: 250)
     }
