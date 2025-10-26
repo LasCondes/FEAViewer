@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "FEAViewer",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)
     ],
     dependencies: [
         .package(url: "https://github.com/LasCondes/AxiSymFEA.git", from: "1.0.0")
@@ -16,6 +16,9 @@ let package = Package(
             name: "FEAViewer",
             dependencies: [
                 .product(name: "AxiSymFEA", package: "AxiSymFEA")
+            ],
+            resources: [
+                .copy("../../Resources")
             ]
         ),
     ]

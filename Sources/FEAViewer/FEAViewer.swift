@@ -18,6 +18,47 @@ struct ContentView: View {
     @StateObject private var feaModel = FEAModel()
     @StateObject private var viewModel = FEAViewModel()
 
+    func saveModel() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "model.json"
+        panel.title = "Save FEA Model"
+
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                do {
+                    try feaModel.saveToFile(url)
+                } catch {
+                    print("Error saving model: \(error)")
+                }
+            }
+        }
+    }
+
+    func loadModel() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.title = "Load FEA Model"
+
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                do {
+                    try feaModel.loadFromFile(url)
+                } catch {
+                    print("Error loading model: \(error)")
+                }
+            }
+        }
+    }
+
+    func loadExample(_ model: SerializableModel) {
+        let encoder = JSONEncoder()
+        if let data = try? encoder.encode(model) {
+            try? feaModel.loadFromData(data)
+        }
+    }
+
     var body: some View {
         HSplitView {
             // Left: Model definition
@@ -27,10 +68,32 @@ struct ContentView: View {
                     Text("FEA Model")
                         .font(.headline)
                     Spacer()
+
+                    Menu("Examples") {
+                        ForEach(ExampleModels.allExamples, id: \.name) { example in
+                            Button(example.name) {
+                                loadExample(example.model)
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Load...") {
+                        loadModel()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Save...") {
+                        saveModel()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(feaModel.nodes.isEmpty)
+
                     Button("Clear All") {
                         feaModel.clear()
                     }
                     .buttonStyle(.bordered)
+
                     Button("Run Analysis") {
                         viewModel.runAnalysis(model: feaModel)
                     }
@@ -96,6 +159,7 @@ struct ModelBuilderView: View {
     @State private var showingAddNode = false
     @State private var showingAddElement = false
     @State private var showingAddConstraint = false
+    @State private var showingAddLoad = false
 
     var body: some View {
         ScrollView {
@@ -218,6 +282,32 @@ struct ModelBuilderView: View {
                         }
                     }
                 }
+
+                // Loads
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Loads")
+                                .font(.headline)
+                            Spacer()
+                            Button(action: { showingAddLoad = true }) {
+                                Label("Add", systemImage: "plus.circle")
+                            }
+                            .disabled(model.nodes.isEmpty)
+                        }
+
+                        ForEach(model.loads) { load in
+                            LoadRow(model: model, load: load)
+                        }
+
+                        if model.loads.isEmpty {
+                            Text("No loads defined")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.vertical, 4)
+                        }
+                    }
+                }
             }
             .padding()
         }
@@ -226,6 +316,9 @@ struct ModelBuilderView: View {
         }
         .sheet(isPresented: $showingAddConstraint) {
             AddConstraintSheet(model: model, isPresented: $showingAddConstraint)
+        }
+        .sheet(isPresented: $showingAddLoad) {
+            AddLoadSheet(model: model, isPresented: $showingAddLoad)
         }
     }
 }
@@ -655,6 +748,43 @@ struct ConstraintRow: View {
     }
 }
 
+// MARK: - Load Row
+
+struct LoadRow: View {
+    @ObservedObject var model: FEAModel
+    let load: Load
+
+    var body: some View {
+        HStack {
+            Image(systemName: "arrow.down.circle.fill")
+                .foregroundColor(.red)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(nodeName)
+                    .font(.caption)
+                Text(load.description)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Button(action: { model.deleteLoad(load) }) {
+                Image(systemName: "trash")
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(6)
+        .background(Color.red.opacity(0.1))
+        .cornerRadius(4)
+    }
+
+    var nodeName: String {
+        if let node = model.getNode(id: load.nodeID) {
+            return node.label.isEmpty ? node.description : node.label
+        }
+        return "???"
+    }
+}
+
 // MARK: - Add Constraint Sheet
 
 struct AddConstraintSheet: View {
@@ -730,6 +860,82 @@ struct AddConstraintSheet: View {
     }
 }
 
+// MARK: - Add Load Sheet
+
+struct AddLoadSheet: View {
+    @ObservedObject var model: FEAModel
+    @Binding var isPresented: Bool
+
+    @State private var selectedNodeID: UUID?
+    @State private var selectedDOF: DOFType = .w
+    @State private var magnitude: Double = 0.0
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Add Load")
+                .font(.title2)
+                .bold()
+
+            Form {
+                Picker("Node", selection: $selectedNodeID) {
+                    Text("Select node...").tag(nil as UUID?)
+                    ForEach(model.nodes) { node in
+                        Text(node.label.isEmpty ? node.description : node.label).tag(node.id as UUID?)
+                    }
+                }
+
+                if let nodeID = selectedNodeID {
+                    Picker("DOF", selection: $selectedDOF) {
+                        ForEach(model.getAvailableDOFs(for: nodeID), id: \.self) { dof in
+                            Text(dof.displayName).tag(dof)
+                        }
+                    }
+                }
+
+                HStack {
+                    Text("Magnitude:")
+                    TextField("", value: $magnitude, format: .number)
+                    Text(loadUnit)
+                }
+            }
+            .padding()
+
+            HStack {
+                Button("Cancel") {
+                    isPresented = false
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Add") {
+                    guard let nodeID = selectedNodeID else { return }
+
+                    let load = Load(
+                        nodeID: nodeID,
+                        dofType: selectedDOF,
+                        magnitude: magnitude
+                    )
+                    model.addLoad(load)
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedNodeID == nil)
+            }
+            .padding()
+        }
+        .frame(width: 400, height: 300)
+    }
+
+    var loadUnit: String {
+        switch selectedDOF {
+        case .u, .v, .w:
+            return "N"
+        case .gamma, .phi, .beta:
+            return "N·mm"
+        }
+    }
+}
+
 // MARK: - Visualization View
 
 struct VisualizationView: View {
@@ -739,8 +945,6 @@ struct VisualizationView: View {
     var body: some View {
         Canvas { context, size in
             let padding: CGFloat = 40
-            let _ = size.width - 2 * padding
-            let _ = size.height - 2 * padding
 
             // Draw axes
             var axesPath = Path()
@@ -757,7 +961,7 @@ struct VisualizationView: View {
                 context.stroke(nodeCircle, with: .color(.black), lineWidth: 1)
             }
 
-            // Draw shaft elements
+            // Draw shaft elements as rectangles
             for element in model.shaftElements {
                 guard let start = model.getNode(id: element.startNodeID),
                       let end = model.getNode(id: element.endNodeID) else { continue }
@@ -765,10 +969,18 @@ struct VisualizationView: View {
                 let p1 = getNodePoint(node: start, size: size, padding: padding)
                 let p2 = getNodePoint(node: end, size: size, padding: padding)
 
-                var path = Path()
-                path.move(to: p1)
-                path.addLine(to: p2)
-                context.stroke(path, with: .color(.blue), lineWidth: 3)
+                // Calculate rectangle for shaft (representing diameter)
+                let shaftHeight: CGFloat = 20  // Visual height for shaft
+                let rect = CGRect(
+                    x: min(p1.x, p2.x),
+                    y: min(p1.y, p2.y) - shaftHeight/2,
+                    width: abs(p2.x - p1.x),
+                    height: shaftHeight
+                )
+
+                let path = Path(rect)
+                context.fill(path, with: .color(.blue.opacity(0.3)))
+                context.stroke(path, with: .color(.blue), lineWidth: 2)
             }
 
             // Draw disk elements
@@ -779,13 +991,22 @@ struct VisualizationView: View {
                 let p1 = getNodePoint(node: inner, size: size, padding: padding)
                 let p2 = getNodePoint(node: outer, size: size, padding: padding)
 
+                // Draw as trapezoid representing thickness variation
                 var path = Path()
-                path.move(to: p1)
-                path.addLine(to: p2)
-                context.stroke(path, with: .color(.green), style: StrokeStyle(lineWidth: 2, dash: [5, 3]))
+                let t1Height = CGFloat(element.thicknessBegin) * 0.2
+                let t2Height = CGFloat(element.thicknessEnd) * 0.2
+
+                path.move(to: CGPoint(x: p1.x, y: p1.y - t1Height/2))
+                path.addLine(to: CGPoint(x: p2.x, y: p2.y - t2Height/2))
+                path.addLine(to: CGPoint(x: p2.x, y: p2.y + t2Height/2))
+                path.addLine(to: CGPoint(x: p1.x, y: p1.y + t1Height/2))
+                path.closeSubpath()
+
+                context.fill(path, with: .color(.green.opacity(0.3)))
+                context.stroke(path, with: .color(.green), lineWidth: 2)
             }
 
-            // Draw shell elements
+            // Draw shell elements as rectangles
             for element in model.shellElements {
                 guard let start = model.getNode(id: element.startNodeID),
                       let end = model.getNode(id: element.endNodeID) else { continue }
@@ -793,9 +1014,16 @@ struct VisualizationView: View {
                 let p1 = getNodePoint(node: start, size: size, padding: padding)
                 let p2 = getNodePoint(node: end, size: size, padding: padding)
 
-                var path = Path()
-                path.move(to: p1)
-                path.addLine(to: p2)
+                let shellHeight = CGFloat(element.thickness) * 0.5
+                let rect = CGRect(
+                    x: min(p1.x, p2.x),
+                    y: min(p1.y, p2.y) - shellHeight/2,
+                    width: abs(p2.x - p1.x),
+                    height: shellHeight
+                )
+
+                let path = Path(rect)
+                context.fill(path, with: .color(.orange.opacity(0.3)))
                 context.stroke(path, with: .color(.orange), lineWidth: 2)
             }
 
@@ -806,6 +1034,121 @@ struct VisualizationView: View {
 
                 let constraintRect = Path(ellipseIn: CGRect(x: point.x - 6, y: point.y - 6, width: 12, height: 12))
                 context.stroke(constraintRect, with: .color(.purple), lineWidth: 2)
+            }
+
+            // Draw loads
+            for load in model.loads {
+                guard let node = model.getNode(id: load.nodeID) else { continue }
+                let point = getNodePoint(node: node, size: size, padding: padding)
+
+                // Draw different visualizations based on load type
+                switch load.dofType {
+                case .beta:  // Torque - draw curved arrow
+                    let radius: CGFloat = 15
+                    var torquePath = Path()
+
+                    // Draw arc - note: screen Y is inverted, so clockwise on screen = counter-clockwise in physics
+                    // Positive torque (counter-clockwise in physics) appears clockwise on screen
+                    torquePath.addArc(
+                        center: point,
+                        radius: radius,
+                        startAngle: .degrees(45),
+                        endAngle: .degrees(315),
+                        clockwise: load.magnitude < 0  // Inverted due to screen coordinates
+                    )
+
+                    // Draw arrowhead at the end of the arc
+                    let arrowAngle = load.magnitude < 0 ? 315.0 : 45.0  // Swapped for screen coordinates
+                    let angleRad = arrowAngle * .pi / 180.0
+                    let arrowTip = CGPoint(
+                        x: point.x + radius * cos(angleRad),
+                        y: point.y + radius * sin(angleRad)
+                    )
+                    let arrowSize: CGFloat = 8
+
+                    // Perpendicular angle for arrowhead direction
+                    let perpAngle = load.magnitude < 0 ? (angleRad - .pi / 2) : (angleRad + .pi / 2)
+
+                    var arrowPath = Path()
+                    arrowPath.move(to: arrowTip)
+                    arrowPath.addLine(to: CGPoint(
+                        x: arrowTip.x + arrowSize * cos(perpAngle + 0.4),
+                        y: arrowTip.y + arrowSize * sin(perpAngle + 0.4)
+                    ))
+                    arrowPath.move(to: arrowTip)
+                    arrowPath.addLine(to: CGPoint(
+                        x: arrowTip.x + arrowSize * cos(perpAngle - 0.4),
+                        y: arrowTip.y + arrowSize * sin(perpAngle - 0.4)
+                    ))
+
+                    context.stroke(torquePath, with: .color(.red), lineWidth: 2)
+                    context.stroke(arrowPath, with: .color(.red), lineWidth: 2)
+
+                case .w:  // Transverse force - vertical arrow
+                    let arrowLength: CGFloat = 25
+                    let direction = load.magnitude > 0 ? -1.0 : 1.0
+
+                    var arrowPath = Path()
+                    arrowPath.move(to: point)
+                    let endPoint = CGPoint(x: point.x, y: point.y + CGFloat(direction) * arrowLength)
+                    arrowPath.addLine(to: endPoint)
+
+                    // Arrowhead
+                    arrowPath.move(to: endPoint)
+                    arrowPath.addLine(to: CGPoint(x: endPoint.x - 5, y: endPoint.y - CGFloat(direction) * 8))
+                    arrowPath.move(to: endPoint)
+                    arrowPath.addLine(to: CGPoint(x: endPoint.x + 5, y: endPoint.y - CGFloat(direction) * 8))
+
+                    context.stroke(arrowPath, with: .color(.red), lineWidth: 2)
+
+                case .u:  // Axial force - horizontal arrow
+                    let arrowLength: CGFloat = 25
+                    let direction = load.magnitude > 0 ? 1.0 : -1.0
+
+                    var arrowPath = Path()
+                    arrowPath.move(to: point)
+                    let endPoint = CGPoint(x: point.x + CGFloat(direction) * arrowLength, y: point.y)
+                    arrowPath.addLine(to: endPoint)
+
+                    // Arrowhead
+                    arrowPath.move(to: endPoint)
+                    arrowPath.addLine(to: CGPoint(x: endPoint.x - CGFloat(direction) * 8, y: endPoint.y - 5))
+                    arrowPath.move(to: endPoint)
+                    arrowPath.addLine(to: CGPoint(x: endPoint.x - CGFloat(direction) * 8, y: endPoint.y + 5))
+
+                    context.stroke(arrowPath, with: .color(.red), lineWidth: 2)
+
+                case .v:  // Tangential force - diagonal arrow
+                    let arrowLength: CGFloat = 25
+                    let direction = load.magnitude > 0 ? 1.0 : -1.0
+
+                    var arrowPath = Path()
+                    arrowPath.move(to: point)
+                    let endPoint = CGPoint(x: point.x + CGFloat(direction) * arrowLength * 0.707, y: point.y + CGFloat(direction) * arrowLength * 0.707)
+                    arrowPath.addLine(to: endPoint)
+
+                    // Arrowhead
+                    arrowPath.move(to: endPoint)
+                    arrowPath.addLine(to: CGPoint(x: endPoint.x - 8, y: endPoint.y))
+                    arrowPath.move(to: endPoint)
+                    arrowPath.addLine(to: CGPoint(x: endPoint.x, y: endPoint.y - 8))
+
+                    context.stroke(arrowPath, with: .color(.red), lineWidth: 2)
+
+                case .gamma, .phi:  // Moments - small curved arrow
+                    let radius: CGFloat = 12
+                    var momentPath = Path()
+
+                    momentPath.addArc(
+                        center: point,
+                        radius: radius,
+                        startAngle: .degrees(0),
+                        endAngle: .degrees(270),
+                        clockwise: load.magnitude > 0
+                    )
+
+                    context.stroke(momentPath, with: .color(.red), lineWidth: 2)
+                }
             }
         }
     }
@@ -862,6 +1205,11 @@ struct ResultsView: View {
                                     .foregroundColor(results.success ? .green : .red)
                             }
                             HStack {
+                                Text("Mode:")
+                                    .bold()
+                                Text("\(results.analysisMode)")
+                            }
+                            HStack {
                                 Text("DOFs:")
                                     .bold()
                                 Text("\(results.totalDOFs)")
@@ -873,6 +1221,81 @@ struct ResultsView: View {
                             }
                         }
                         .font(.caption)
+                    }
+
+                    if results.success, let model = viewModel.model {
+                        // Graphs (if shaft elements exist)
+                        if !model.shaftElements.isEmpty {
+                            GroupBox("Axial Force Distribution") {
+                                AxialForceGraphView(model: model, results: results)
+                                    .frame(height: 200)
+                            }
+
+                            GroupBox("Axial Displacement Distribution") {
+                                AxialDisplacementGraphView(model: model, results: results)
+                                    .frame(height: 200)
+                            }
+
+                            GroupBox("Torque Distribution") {
+                                TorqueGraphView(model: model, results: results)
+                                    .frame(height: 200)
+                            }
+
+                            GroupBox("Angular Displacement Distribution") {
+                                AngularDisplacementGraphView(model: model, results: results)
+                                    .frame(height: 200)
+                            }
+                        }
+
+                        // Reaction Forces
+                        if !results.reactionForces.isEmpty {
+                            GroupBox("Reaction Forces") {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(results.reactionForces) { reaction in
+                                        if let node = model.getNode(id: reaction.nodeID) {
+                                            HStack {
+                                                Image(systemName: "arrow.up.circle.fill")
+                                                    .foregroundColor(.purple)
+                                                    .frame(width: 12)
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(node.label.isEmpty ? node.description : node.label)
+                                                        .font(.caption)
+                                                        .bold()
+                                                    Text("\(reaction.dofType.displayName): \(reaction.magnitude, specifier: "%.3e") \(reactionUnit(for: reaction.dofType))")
+                                                        .font(.caption2)
+                                                        .foregroundColor(.secondary)
+                                                }
+                                                Spacer()
+                                            }
+                                            .padding(6)
+                                            .background(Color.purple.opacity(0.1))
+                                            .cornerRadius(4)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        GroupBox("Node Displacements") {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(Array(results.nodeDisplacements.sorted(by: { model.getNode(id: $0.key)?.x ?? 0 < model.getNode(id: $1.key)?.x ?? 0 })), id: \.key) { nodeID, disps in
+                                        if let node = model.getNode(id: nodeID) {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(node.label.isEmpty ? node.description : node.label)
+                                                    .font(.caption)
+                                                    .bold()
+                                                ForEach(Array(disps.enumerated()), id: \.offset) { index, value in
+                                                    Text("  DOF[\(index)]: \(value, specifier: "%.6e")")
+                                                        .font(.system(.caption2, design: .monospaced))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 200)
+                        }
                     }
 
                     if !results.solutionVector.isEmpty {
@@ -898,31 +1321,41 @@ struct ResultsView: View {
             .padding()
         }
     }
+
+    func reactionUnit(for dofType: DOFType) -> String {
+        switch dofType {
+        case .u, .v, .w:
+            return "N"  // Force
+        case .gamma, .phi, .beta:
+            return "N·mm"  // Moment/Torque
+        }
+    }
 }
 
 // MARK: - View Model
 
+@MainActor
 class FEAViewModel: ObservableObject {
     @Published var results: FEAResults?
     @Published var isRunning = false
     @Published var error: String?
+    var model: FEAModel?
 
     func runAnalysis(model: FEAModel) {
+        self.model = model
         isRunning = true
         error = nil
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        Task {
             do {
-                let results = try model.solve()
-                DispatchQueue.main.async {
-                    self.results = results
-                    self.isRunning = false
-                }
+                // Run the solve operation (it handles background execution internally)
+                let results = try await model.solve()
+
+                self.results = results
+                self.isRunning = false
             } catch {
-                DispatchQueue.main.async {
-                    self.error = error.localizedDescription
-                    self.isRunning = false
-                }
+                self.error = error.localizedDescription
+                self.isRunning = false
             }
         }
     }
