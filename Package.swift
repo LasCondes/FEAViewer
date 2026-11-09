@@ -9,7 +9,7 @@ let package = Package(
         .macOS(.v14)
     ],
     dependencies: [
-        .package(url: "https://github.com/LasCondes/AxiSymFEA.git", from: "1.0.0")
+        .package(url: "https://github.com/LasCondes/AxiSymFEA.git", from: "3.10.0")
     ],
     targets: [
         .executableTarget(

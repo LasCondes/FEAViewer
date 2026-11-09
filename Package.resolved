@@ -1,13 +1,13 @@
 {
-  "originHash" : "86f1fda3a3c99cff893e23de5baa48c92b97eedd3a6ba9b84230f9ccd6d50da4",
+  "originHash" : "c115271e92d4537aafed22d677cf02f5f56c3196c894b71fbecbe116c66d140e",
   "pins" : [
     {
       "identity" : "axisymfea",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/LasCondes/AxiSymFEA.git",
       "state" : {
-        "revision" : "a45eff5e900688e5dc58521a5aa5e66118251c63",
-        "version" : "1.0.4"
+        "revision" : "2d69f39bd2deaff310d36d745c6ed0af88dc2a4f",
+        "version" : "3.10.0"
       }
     }
   ],

@@ -52,7 +52,7 @@ struct ShaftConfig: Identifiable, Codable, Sendable {
     private var modelString: String
     var mode: Int  // Fourier mode: 0 (axial/torsion), 1/-1 (bending)
 
-    init(id: UUID = UUID(), startNodeID: UUID, endNodeID: UUID, diameter: Double = 50.0, model: ShaftElement.ShaftModel = .timoshenko, mode: Int = 0) {
+    init(id: UUID = UUID(), startNodeID: UUID, endNodeID: UUID, diameter: Double = 50.0, model: ShaftElement.ShaftModel = .timoshenko(), mode: Int = 0) {
         self.id = id
         self.startNodeID = startNodeID
         self.endNodeID = endNodeID
@@ -63,7 +63,7 @@ struct ShaftConfig: Identifiable, Codable, Sendable {
 
     var model: ShaftElement.ShaftModel {
         get {
-            modelString == "eulerBernoulli" ? .eulerBernoulli : .timoshenko
+            modelString == "eulerBernoulli" ? .eulerBernoulli : .timoshenko()
         }
         set {
             modelString = newValue == .eulerBernoulli ? "eulerBernoulli" : "timoshenko"
@@ -108,7 +108,7 @@ struct ShellConfig: Identifiable, Codable, Sendable {
         self.endNodeID = endNodeID
         self.radius = radius
         self.thickness = thickness
-        self.modelString = model == .ventselKrauthammer ? "ventselKrauthammer" : "ventselKrauthammer"  // Only one model available
+        self.modelString = "ventselKrauthammer"  // The only shell theory FEAViewer offers
         self.mode = mode
     }
 
@@ -511,161 +511,147 @@ class FEAModel: ObservableObject {
 
     nonisolated private static func performSolve(with modelData: SerializableModel) throws -> FEAResults {
         let startTime = Date()
+        let exact = GeometryTolerance.exact
+        let feaNodes = Dictionary(uniqueKeysWithValues: modelData.nodes.map { ($0.id, $0) })
+        func name(_ node: FEANode) -> String { node.label.isEmpty ? node.description : node.label }
 
-        // Create assembly
-        let assembly = FEAssembly()
-
-        // Map to store AxiSymFEA nodes created from our FEANodes
-        var nodeMap: [UUID: Node] = [:]
-
-        // First, create all unique nodes with sequential IDs
-        for (index, feaNode) in modelData.nodes.enumerated() {
-            // All elements (shaft, disk, shell) use 4 DOFs
-            let axiSymNode = Node(id: index, r: feaNode.r, z: feaNode.x, numberOfDisplacements: 4)
-            nodeMap[feaNode.id] = axiSymNode
+        // A node's degrees of freedom are fixed by its layout: w, γ, u, β on a shaft node and
+        // u, v, w, φ on a disk or shell node. AxiSymFEA can't share one node between the two;
+        // a shaft joins a disk through a connector element instead.
+        let shaftNodeIDs = Set(modelData.shaftElements.flatMap { [$0.startNodeID, $0.endNodeID] })
+        let shellDiskNodeIDs = Set(modelData.diskElements.flatMap { [$0.innerNodeID, $0.outerNodeID] }
+            + modelData.shellElements.flatMap { [$0.startNodeID, $0.endNodeID] })
+        if let shared = modelData.nodes.first(where: { shaftNodeIDs.contains($0.id) && shellDiskNodeIDs.contains($0.id) }) {
+            throw FEAError.invalidElement("Node '\(name(shared))' joins a shaft to a disk or shell. A shaft node carries different degrees of freedom, so the two can't share a node.")
         }
 
-        // Add shaft elements using the created nodes
+        var nodeMap: [UUID: Node] = [:]
+        for (index, feaNode) in modelData.nodes.enumerated() {
+            nodeMap[feaNode.id] = shaftNodeIDs.contains(feaNode.id)
+                ? Node.shaft(id: index, z: feaNode.x)
+                : Node.shellDisk(id: index, r: feaNode.r, z: feaNode.x)
+        }
+        let material = Material(youngsModulus: modelData.material.youngsModulus,
+                                poissonsRatio: modelData.material.poissonsRatio)
+
+        // AxiSymFEA checks each element's geometry with preconditions, which would stop the app,
+        // so a model that breaks one is refused here with an error instead.
+        var elements: [any Element] = []
         for config in modelData.shaftElements {
-            guard let startNode = nodeMap[config.startNodeID],
-                  let endNode = nodeMap[config.endNodeID] else {
+            guard let start = feaNodes[config.startNodeID], let end = feaNodes[config.endNodeID],
+                  let startNode = nodeMap[config.startNodeID], let endNode = nodeMap[config.endNodeID] else {
                 throw FEAError.invalidElement("Shaft element has invalid nodes")
             }
-
-            // Validate that shaft element nodes are at r=0 (on centerline)
-            guard let startFEANode = modelData.nodes.first(where: { $0.id == config.startNodeID }),
-                  let endFEANode = modelData.nodes.first(where: { $0.id == config.endNodeID }) else {
-                throw FEAError.invalidElement("Shaft element references non-existent nodes")
+            for node in [start, end] where abs(node.r) > 1e-6 {
+                throw FEAError.invalidElement("Shaft element node '\(name(node))' must be at r=0 (currently r=\(node.r))")
             }
-
-            if abs(startFEANode.r) > 1e-6 {
-                throw FEAError.invalidElement("Shaft element start node '\(startFEANode.label.isEmpty ? startFEANode.description : startFEANode.label)' must be at r=0 (currently r=\(startFEANode.r))")
+            guard !exact.matches(start.x, end.x) else {
+                throw FEAError.invalidElement("Shaft element from '\(name(start))' to '\(name(end))' has zero length")
             }
-
-            if abs(endFEANode.r) > 1e-6 {
-                throw FEAError.invalidElement("Shaft element end node '\(endFEANode.label.isEmpty ? endFEANode.description : endFEANode.label)' must be at r=0 (currently r=\(endFEANode.r))")
+            guard config.diameter.isFinite, config.diameter > 0 else {
+                throw FEAError.invalidElement("Shaft element diameter must be positive (currently \(config.diameter))")
             }
-
-            let element = ShaftElement(
-                node1: startNode,
-                node2: endNode,
-                diameter: config.diameter,
-                youngsModulus: modelData.material.youngsModulus,
-                poissonsRatio: modelData.material.poissonsRatio,
-                mode: config.mode,
-                model: config.model
-            )
-            assembly.addElement(element)
+            elements.append(ShaftElement(node1: startNode, node2: endNode, diameter: config.diameter,
+                                         material: material, mode: config.mode, model: config.model))
         }
-
-        // Add disk elements using the created nodes
         for config in modelData.diskElements {
-            guard let innerNode = nodeMap[config.innerNodeID],
-                  let outerNode = nodeMap[config.outerNodeID] else {
+            guard let inner = feaNodes[config.innerNodeID], let outer = feaNodes[config.outerNodeID],
+                  let innerNode = nodeMap[config.innerNodeID], let outerNode = nodeMap[config.outerNodeID] else {
                 throw FEAError.invalidElement("Disk element has invalid nodes")
             }
-
-            let element = DiskElement(
-                innerNode: innerNode,
-                outerNode: outerNode,
-                thicknessBegin: config.thicknessBegin,
-                thicknessEnd: config.thicknessEnd,
-                youngsModulus: modelData.material.youngsModulus,
-                poissonsRatio: modelData.material.poissonsRatio,
-                useNumericalIntegration: true,
-                mode: config.mode
-            )
-            assembly.addElement(element)
+            guard exact.matches(inner.x, outer.x) else {
+                throw FEAError.invalidElement("Disk element nodes '\(name(inner))' and '\(name(outer))' must be at the same axial position")
+            }
+            guard inner.r > 0, outer.r > inner.r else {
+                throw FEAError.invalidElement("Disk element needs 0 < inner radius < outer radius (currently \(inner.r) and \(outer.r))")
+            }
+            guard [config.thicknessBegin, config.thicknessEnd].allSatisfy({ $0.isFinite && $0 > 0 }) else {
+                throw FEAError.invalidElement("Disk element thicknesses must be positive")
+            }
+            elements.append(DiskElement(innerNode: innerNode, outerNode: outerNode,
+                                        thicknessBegin: config.thicknessBegin, thicknessEnd: config.thicknessEnd,
+                                        material: material, mode: config.mode))
         }
-
-        // Add shell elements using the created nodes
         for config in modelData.shellElements {
-            guard let startNode = nodeMap[config.startNodeID],
-                  let endNode = nodeMap[config.endNodeID] else {
+            guard let start = feaNodes[config.startNodeID], let end = feaNodes[config.endNodeID],
+                  let startNode = nodeMap[config.startNodeID], let endNode = nodeMap[config.endNodeID] else {
                 throw FEAError.invalidElement("Shell element has invalid nodes")
             }
-
-            let element = ShellElement(
-                node1: startNode,
-                node2: endNode,
-                thickness: config.thickness,
-                youngsModulus: modelData.material.youngsModulus,
-                poissonsRatio: modelData.material.poissonsRatio,
-                useNumericalIntegration: false,
-                mode: config.mode,
-                model: config.model
-            )
-            assembly.addElement(element)
+            guard exact.matches(start.r, end.r) else {
+                throw FEAError.invalidElement("Shell element nodes '\(name(start))' and '\(name(end))' must be at the same radius")
+            }
+            guard start.r > 0 else {
+                throw FEAError.invalidElement("Shell element radius must be positive (currently r=\(start.r))")
+            }
+            guard !exact.matches(start.x, end.x) else {
+                throw FEAError.invalidElement("Shell element from '\(name(start))' to '\(name(end))' has zero length")
+            }
+            guard config.thickness.isFinite, config.thickness > 0 else {
+                throw FEAError.invalidElement("Shell element thickness must be positive (currently \(config.thickness))")
+            }
+            elements.append(ShellElement(node1: startNode, node2: endNode, thickness: config.thickness,
+                                         material: material, mode: config.mode, model: config.model))
         }
+        guard !elements.isEmpty else { throw FEAError.noElements }
 
-        // Determine mode from elements (use mode 0 if mixed or empty)
+        // Every element is built for the model's Fourier mode.
         let modes = modelData.shaftElements.map { $0.mode } + modelData.diskElements.map { $0.mode } + modelData.shellElements.map { $0.mode }
         let analysisMode = modes.first ?? 0
-
-        // Assemble system
-        assembly.assemble(mode: analysisMode)
-
-        let totalDOFs = assembly.variableCount()
-
-        // Apply constraints
-        try Self.applyConstraints(modelData: modelData, assembly: assembly, nodeMap: nodeMap)
-
-        // Apply loads
-        try Self.applyLoads(modelData: modelData, assembly: assembly, nodeMap: nodeMap)
-
-        let success = assembly.solve()
-
-        let solveTime = Date().timeIntervalSince(startTime)
-
-        let solutionVector = assembly.getSolution()?.flattenedData ?? []
-
-        // Extract node displacements
-        var nodeDisplacements: [UUID: [Double]] = [:]
-        for (nodeID, axiSymNode) in nodeMap {
-            let dofIndices = assembly.getDOFIndices(forNode: axiSymNode)
-            var disps: [Double] = []
-            for dofIndex in dofIndices {
-                if dofIndex < solutionVector.count {
-                    disps.append(solutionVector[dofIndex])
-                }
-            }
-            nodeDisplacements[nodeID] = disps
+        if let other = modes.first(where: { $0 != analysisMode }) {
+            throw FEAError.invalidElement("Every element must use the same Fourier mode; this model mixes \(analysisMode) and \(other)")
         }
 
-        // Calculate reaction forces at constraints using the assembly API
-        let reactionsByDOF = assembly.getReactionForces()
-
-        var reactionForces: [ReactionForce] = []
-        for constraint in modelData.constraints {
-            guard let axiSymNode = nodeMap[constraint.nodeID] else { continue }
-
-            // Get element type to determine DOF ordering
-            let elementType = Self.getElementTypeForNode(constraint.nodeID, in: modelData)
-            guard let dofIndex = try? Self.getDOFIndex(for: constraint.dofType, elementType: elementType) else {
-                continue
+        // The node and quantity a constraint or load acts on.
+        func target(_ nodeID: UUID, _ dofType: DOFType, _ invalid: (String) -> FEAError, _ subject: String) throws -> (Node, DOFKind) {
+            guard let node = nodeMap[nodeID] else { throw invalid("\(subject) references non-existent node") }
+            let onShaft = shaftNodeIDs.contains(nodeID)
+            guard onShaft || shellDiskNodeIDs.contains(nodeID) else { throw invalid("\(subject) is on a node no element uses") }
+            guard let kind = Self.dofKind(for: dofType, onShaftNode: onShaft) else {
+                throw invalid(onShaft ? "Invalid DOF type for shaft element" : "Invalid DOF type for disk/shell element")
             }
+            return (node, kind)
+        }
+        let conditions: [BoundaryCondition] = try modelData.constraints.map { constraint in
+            let (node, kind) = try target(constraint.nodeID, constraint.dofType, FEAError.invalidConstraint, "Constraint")
+            switch constraint.constraintType {
+            case .fixed: return .fixed(kind, at: node)
+            case .prescribed: return .prescribed(kind, value: constraint.value, at: node)
+            }
+        }
+        let loads: [HarmonicNodalLoad] = try modelData.loads.map { load in
+            let (node, kind) = try target(load.nodeID, load.dofType, FEAError.invalidLoad, "Load")
+            return HarmonicNodalLoad(load.magnitude, on: kind, at: node)
+        }
 
-            let dofIndices = assembly.getDOFIndices(forNode: axiSymNode)
-            guard dofIndex < dofIndices.count else { continue }
+        let model = AxisymmetricModel(mode: analysisMode, elements: elements)
+        let solution: HarmonicSolution
+        do {
+            solution = try HarmonicProblem(model: model, boundaryConditions: conditions, nodalLoads: loads).solve(output: .none)
+        } catch {
+            throw FEAError.analysisFailed((error as? LocalizedError)?.errorDescription ?? String(describing: error))
+        }
+        let solveTime = Date().timeIntervalSince(startTime)
 
-            let globalDOF = dofIndices[dofIndex]
-
-            // Get reaction force from the assembly
-            let reactionMagnitude = reactionsByDOF[globalDOF] ?? 0.0
-
-            reactionForces.append(ReactionForce(
-                constraintID: constraint.id,
-                nodeID: constraint.nodeID,
-                dofType: constraint.dofType,
-                magnitude: reactionMagnitude
-            ))
+        // Displacements in each node's own order, as above, and the solution as those in node order.
+        var nodeDisplacements: [UUID: [Double]] = [:]
+        var solutionVector: [Double] = []
+        for feaNode in modelData.nodes where shaftNodeIDs.contains(feaNode.id) || shellDiskNodeIDs.contains(feaNode.id) {
+            guard let node = nodeMap[feaNode.id] else { continue }
+            let displacements = try node.dofLayout.kinds.map { try solution.displacement($0, at: node) }
+            nodeDisplacements[feaNode.id] = displacements
+            solutionVector += displacements
+        }
+        let reactionForces = try modelData.constraints.map { constraint in
+            let (node, kind) = try target(constraint.nodeID, constraint.dofType, FEAError.invalidConstraint, "Constraint")
+            return ReactionForce(constraintID: constraint.id, nodeID: constraint.nodeID,
+                                 dofType: constraint.dofType, magnitude: try solution.reaction(kind, at: node))
         }
 
         return FEAResults(
             solveTime: solveTime,
-            totalDOFs: totalDOFs,
+            totalDOFs: solutionVector.count,
             solutionVector: solutionVector,
-            success: success,
+            success: true,
             nodeDisplacements: nodeDisplacements,
             analysisMode: analysisMode,
             reactionForces: reactionForces
@@ -732,112 +718,24 @@ class FEAModel: ObservableObject {
 
     // MARK: - Private Helper Methods
 
-    nonisolated private static func applyConstraints(modelData: SerializableModel, assembly: FEAssembly, nodeMap: [UUID: Node]) throws {
-        // Apply each constraint directly using node references
-        for constraint in modelData.constraints {
-            guard modelData.nodes.contains(where: { $0.id == constraint.nodeID }) else {
-                throw FEAError.invalidConstraint("Constraint references non-existent node")
-            }
-
-            guard let axiSymNode = nodeMap[constraint.nodeID] else {
-                throw FEAError.invalidConstraint("Node not found in assembly")
-            }
-
-            let dofIndices = assembly.getDOFIndices(forNode: axiSymNode)
-
-            // Determine element type from which element uses this node
-            let elementType = Self.getElementTypeForNode(constraint.nodeID, in: modelData)
-            let dofIndex = try Self.getDOFIndex(for: constraint.dofType, elementType: elementType)
-
-            guard dofIndex < dofIndices.count else {
-                throw FEAError.invalidConstraint("DOF index out of range")
-            }
-
-            let globalDOF = dofIndices[dofIndex]
-
-            switch constraint.constraintType {
-            case .fixed:
-                assembly.fixDOF(globalDOF)
-            case .prescribed:
-                assembly.prescribeDisplacement(constraint.value, atDOF: globalDOF)
-            }
-        }
-    }
-
-    nonisolated private static func getElementTypeForNode(_ nodeID: UUID, in modelData: SerializableModel) -> FEAElementType? {
-        // Check which type of element uses this node
-        if modelData.shaftElements.contains(where: { $0.startNodeID == nodeID || $0.endNodeID == nodeID }) {
-            return .shaft
-        }
-        if modelData.diskElements.contains(where: { $0.innerNodeID == nodeID || $0.outerNodeID == nodeID }) {
-            return .disk
-        }
-        if modelData.shellElements.contains(where: { $0.startNodeID == nodeID || $0.endNodeID == nodeID }) {
-            return .shell
-        }
-        return nil
-    }
-
-    nonisolated private static func getDOFIndex(for dofType: DOFType, elementType: FEAElementType?) throws -> Int {
-        // Map DOF type to index based on element type
-        switch elementType {
-        case .shaft:
-            // Shaft DOF order: [w, gamma, u, beta]
+    /// The AxiSymFEA quantity a DOF names: w, γ, u, β on a shaft node, and u, v, w, φ on a disk or
+    /// shell node, which are the orders of AxiSymFEA's `shaft` and `shellDisk` layouts.
+    nonisolated private static func dofKind(for dofType: DOFType, onShaftNode: Bool) -> DOFKind? {
+        if onShaftNode {
             switch dofType {
-            case .w: return 0
-            case .gamma: return 1
-            case .u: return 2
-            case .beta: return 3
-            default:
-                throw FEAError.invalidConstraint("Invalid DOF type for shaft element")
-            }
-
-        case .disk, .shell:
-            // Disk/Shell DOF order: [u, v, w, phi]
-            switch dofType {
-            case .u: return 0
-            case .v: return 1
-            case .w: return 2
-            case .phi: return 3
-            default:
-                throw FEAError.invalidConstraint("Invalid DOF type for disk/shell element")
-            }
-
-        case nil:
-            // Node not connected to any element, assume disk/shell DOF ordering
-            switch dofType {
-            case .u: return 0
-            case .v: return 1
-            case .w: return 2
-            case .phi: return 3
-            default: return 0
+            case .w: return .radial
+            case .gamma: return .meridionalRotation
+            case .u: return .axial
+            case .beta: return .torsion
+            default: return nil
             }
         }
-    }
-
-    nonisolated private static func applyLoads(modelData: SerializableModel, assembly: FEAssembly, nodeMap: [UUID: Node]) throws {
-        // Apply each load to the corresponding DOF
-        for load in modelData.loads {
-            guard modelData.nodes.contains(where: { $0.id == load.nodeID }) else {
-                throw FEAError.invalidLoad("Load references non-existent node")
-            }
-
-            guard let axiSymNode = nodeMap[load.nodeID] else {
-                throw FEAError.invalidLoad("Node not found in assembly")
-            }
-
-            let dofIndices = assembly.getDOFIndices(forNode: axiSymNode)
-
-            // Determine element type from which element uses this node
-            let elementType = Self.getElementTypeForNode(load.nodeID, in: modelData)
-            let dofIndex = try Self.getDOFIndex(for: load.dofType, elementType: elementType)
-
-            guard dofIndex < dofIndices.count else {
-                throw FEAError.invalidLoad("DOF index out of range")
-            }
-
-            let globalDOF = dofIndices[dofIndex]
-            assembly.applyForce(load.magnitude, atDOF: globalDOF)
+        switch dofType {
+        case .u: return .axial
+        case .v: return .tangential
+        case .w: return .radial
+        case .phi: return .meridionalRotation
+        default: return nil
         }
     }
 }
@@ -847,6 +745,7 @@ class FEAModel: ObservableObject {
 enum FEAError: LocalizedError, Sendable {
     case noElements
     case solutionFailed
+    case analysisFailed(String)
     case invalidConstraint(String)
     case invalidElement(String)
     case invalidLoad(String)
@@ -857,6 +756,8 @@ enum FEAError: LocalizedError, Sendable {
             return "No elements in model. Add at least one element."
         case .solutionFailed:
             return "FEA solver failed to converge"
+        case .analysisFailed(let message):
+            return "Analysis failed: \(message)"
         case .invalidConstraint(let message):
             return "Invalid constraint: \(message)"
         case .invalidElement(let message):
