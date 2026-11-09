@@ -4,7 +4,7 @@ This directory contains example FEA models in JSON format that can be loaded fro
 
 ## Available Examples
 
-1. **Simply Supported Shaft (500mm)** - Shaft with transverse and axial loads at center
+1. **Simply Supported Shaft (500mm)** - Shaft bent by a transverse load at its center, in Fourier mode 1 (the bending mode)
 2. **Torque Shaft (Torsion)** - Shaft with applied torque demonstrating torsional behavior
 3. **Axial Load Shaft (Tension)** - Shaft with axial tensile load demonstrating axial deformation
 
